@@ -50,8 +50,8 @@ function initialize() {
       event_id           INTEGER NOT NULL,
       user_id            TEXT    NOT NULL,
       user_name          TEXT    NOT NULL,
-      weapon1_id         INTEGER NOT NULL,
-      weapon2_id         INTEGER NOT NULL,
+      weapon1_id         INTEGER DEFAULT NULL,
+      weapon2_id         INTEGER DEFAULT NULL,
       assigned_weapon_id INTEGER DEFAULT NULL,
       confirmed_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(event_id, user_id),
@@ -145,7 +145,7 @@ function closeEvent(id) {
 function upsertConfirmationSimples(event_id, user_id, user_name) {
   return db.prepare(`
     INSERT INTO confirmations (event_id, user_id, user_name, weapon1_id, weapon2_id)
-    VALUES (?, ?, ?, 0, 0)
+    VALUES (?, ?, ?, NULL, NULL)
     ON CONFLICT(event_id, user_id) DO UPDATE SET user_name = excluded.user_name
   `).run(event_id, user_id, user_name);
 }
