@@ -75,15 +75,15 @@ async function pollEvent(client, eventId) {
 
     const res = await sheetsApi.spreadsheets.values.get({
       spreadsheetId: process.env.SPREADSHEET_ID,
-      range: sheetName + '!J4:L60'
+      range: sheetName + '!L4:M60'
     });
 
     const rows = res.data.values || [];
     let updated = false;
 
     for (const row of rows) {
-      const armaName   = (row[1] || '').trim();  // coluna K = ARMA
-      const playerName = (row[2] || '').trim();  // coluna L = PLAYER
+      const armaName   = (row[0] || '').trim();  // coluna L = ARMA
+      const playerName = (row[1] || '').trim();  // coluna M = PLAYER
       if (!armaName || !playerName) continue;
 
       const weapon = weapons.find(w => w.name.toLowerCase() === armaName.toLowerCase());
@@ -180,7 +180,13 @@ function buildEventEmbed(comp, event, confirmations, weapons) {
   }
 
   if (total > 0) {
-    embed.addFields({ name: 'Confirmados: ' + total + ' | Atribuidos: ' + assigned, value: '\u200b', inline: false });
+    // No tipo taaanque mostra so lista de presentes
+    if (event.tipo === 'taaanque') {
+      const lines = confirmations.map((c, i) => (i+1) + '. <@' + c.user_id + '>').join('\n');
+      embed.addFields({ name: 'Confirmados: ' + total, value: lines, inline: false });
+    } else {
+      embed.addFields({ name: 'Confirmados: ' + total + ' | Atribuidos: ' + assigned, value: '\u200b', inline: false });
+    }
   } else {
     embed.addFields({ name: 'Confirmados: 0', value: 'Ninguem confirmou presenca ainda.', inline: false });
   }
@@ -196,6 +202,15 @@ function buildEventButtons(eventId, isClosed) {
     new ButtonBuilder().setCustomId('zvz_cancelar:'  + eventId).setLabel('Cancelar Presenca').setStyle(ButtonStyle.Secondary).setDisabled(isClosed),
     new ButtonBuilder().setCustomId('zvz_atribuir:'  + eventId).setLabel('Atribuir (Caller)').setStyle(ButtonStyle.Primary).setDisabled(isClosed),
     new ButtonBuilder().setCustomId('zvz_fechar:'    + eventId).setLabel('Fechar Evento').setStyle(ButtonStyle.Danger).setDisabled(isClosed)
+  );
+}
+
+function buildTaaanqueButtons(eventId, isClosed) {
+  if (isClosed === undefined) isClosed = false;
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('zvz_taaanque_confirmar:' + eventId).setLabel('Confirmar Presenca').setStyle(ButtonStyle.Success).setDisabled(isClosed),
+    new ButtonBuilder().setCustomId('zvz_taaanque_cancelar:'  + eventId).setLabel('Cancelar Presenca').setStyle(ButtonStyle.Secondary).setDisabled(isClosed),
+    new ButtonBuilder().setCustomId('zvz_fechar:'             + eventId).setLabel('Fechar Evento').setStyle(ButtonStyle.Danger).setDisabled(isClosed)
   );
 }
 
@@ -283,6 +298,10 @@ module.exports = {
     .addSubcommand(sub => sub
       .setName('ping')
       .setDescription('Pingar um evento ZvZ para a guilda')
+      .addStringOption(opt => opt.setName('tipo').setDescription('Tipo do ping').setRequired(true).addChoices(
+        { name: 'Normal (com escolha de armas)', value: 'normal' },
+        { name: 'Taaanque (so presenca)', value: 'taaanque' }
+      ))
       .addStringOption(opt => opt.setName('comp').setDescription('Composicao da ZvZ').setRequired(true).setAutocomplete(true))
       .addStringOption(opt => opt.setName('horario').setDescription('Horario do evento (ex: 20:00 BRT)').setRequired(true))
       .addStringOption(opt => opt.setName('descricao').setDescription('Detalhes do evento').setRequired(false))
@@ -301,19 +320,20 @@ module.exports = {
     const weapons = db.getWeaponsByComp(comp.id);
     if (weapons.length < 2) return interaction.reply({ content: 'A composicao precisa ter pelo menos 2 armas.', ephemeral: true });
 
+    const tipo      = interaction.options.getString('tipo');
     const horario   = interaction.options.getString('horario');
     const descricao = interaction.options.getString('descricao') || '';
     const cargo     = interaction.options.getRole('cargo');
 
-    const result  = db.createEvent(comp.id, interaction.channelId, interaction.user.id, horario, descricao);
+    const result  = db.createEvent(comp.id, interaction.channelId, interaction.user.id, horario, descricao, tipo);
     const eventId = result.lastInsertRowid;
     const event   = db.getEventById(eventId);
     const embed   = buildEventEmbed(comp, event, [], weapons);
-    const buttons = buildEventButtons(eventId);
+    const buttons = tipo === 'taaanque' ? buildTaaanqueButtons(eventId) : buildEventButtons(eventId);
     const mention = cargo ? cargo.toString() + ' ' : '';
 
     const msg = await interaction.reply({
-      content: 'ZVZ CALL! ' + mention,
+      content: 'ZVZ CALL! ' + (tipo === 'taaanque' ? '[TAAANQUE] ' : '') + mention,
       embeds: [embed],
       components: [buttons],
       fetchReply: true
@@ -346,6 +366,41 @@ module.exports = {
     const comp      = db.getCompById(event.comp_id);
     const sheetName = getSheetName(comp.name);
     const weapons   = db.getWeaponsByComp(event.comp_id);
+
+    // ── TAAANQUE: CONFIRMAR PRESENCA SIMPLES ────────────────────────────────────
+    if (action === 'zvz_taaanque_confirmar') {
+      if (event.status === 'closed') return interaction.reply({ content: 'Este evento ja foi fechado.', ephemeral: true });
+
+      const existing = db.getConfirmation(eventId, interaction.user.id);
+      if (existing) return interaction.reply({ content: 'Voce ja confirmou presenca neste evento.', ephemeral: true });
+
+      // Usa weapon1_id e weapon2_id como 0 (nao se aplica no taaanque)
+      db.upsertConfirmationSimples(eventId, interaction.user.id, interaction.member.displayName);
+
+      const confirmations = db.getConfirmationsByEvent(eventId);
+      const number = confirmations.length;
+      sheets.addConfirmationSimples(sheetName, number, interaction.member.displayName).catch(console.error);
+
+      await interaction.reply({ content: 'Presenca confirmada!', ephemeral: true });
+      await refreshEmbed(interaction.client, db.getEventById(eventId));
+      return;
+    }
+
+    // ── TAAANQUE: CANCELAR PRESENCA SIMPLES ──────────────────────────────────
+    if (action === 'zvz_taaanque_cancelar') {
+      const existing = db.getConfirmation(eventId, interaction.user.id);
+      if (!existing) return interaction.reply({ content: 'Voce nao esta confirmado neste evento.', ephemeral: true });
+
+      const confirmations = db.getConfirmationsByEvent(eventId);
+      const number = confirmations.findIndex(c => c.user_id === interaction.user.id) + 1;
+
+      db.removeConfirmation(eventId, interaction.user.id);
+      sheets.removeConfirmation(sheetName, number).catch(console.error);
+
+      await interaction.reply({ content: 'Sua presenca foi cancelada.', ephemeral: true });
+      await refreshEmbed(interaction.client, db.getEventById(eventId));
+      return;
+    }
 
     if (action === 'zvz_confirmar') {
       if (event.status === 'closed') return interaction.reply({ content: 'Este evento ja foi fechado.', ephemeral: true });
