@@ -82,8 +82,8 @@ async function pollEvent(client, eventId) {
     let updated = false;
 
     for (const row of rows) {
-      const armaName   = (row[0] || '').trim();
-      const playerName = (row[2] || '').trim();
+      const armaName   = (row[1] || '').trim();  // coluna K = ARMA
+      const playerName = (row[2] || '').trim();  // coluna L = PLAYER
       if (!armaName || !playerName) continue;
 
       const weapon = weapons.find(w => w.name.toLowerCase() === armaName.toLowerCase());
@@ -92,7 +92,7 @@ async function pollEvent(client, eventId) {
       const confirmations = db.getConfirmationsByEvent(eventId);
       const conf = confirmations.find(c =>
         c.user_name.toLowerCase() === playerName.toLowerCase() &&
-        c.assigned_weapon_id !== weapon.id
+        (!c.assigned_weapon_id || c.assigned_weapon_id !== weapon.id)
       );
       if (!conf) continue;
 
