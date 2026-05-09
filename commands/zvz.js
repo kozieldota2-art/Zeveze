@@ -125,24 +125,42 @@ function buildEventEmbed(comp, event, confirmations, weapons) {
       { name: 'Status',  value: event.status === 'open' ? 'Aberto' : 'Fechado', inline: true }
     );
 
+  // Monta mapa de weapon_id -> player atribuido
+  const assignedMap = {};
+  for (const c of confirmations) {
+    if (c.assigned_weapon_name && c.assigned_weapon_id) {
+      assignedMap[c.assigned_weapon_id] = c;
+    }
+  }
+
   for (const role of Object.keys(ROLE_LABEL)) {
     if (!byRole[role] || !byRole[role].length) continue;
+    const lines = byRole[role].map(w => {
+      const assignedConf = assignedMap[w.id];
+      let line = '- ' + w.name;
+      if (w.build_url) line += ' -- [Build](' + w.build_url + ')';
+      if (assignedConf) line += '\n  --> <@' + assignedConf.user_id + '>';
+      return line;
+    }).join('\n');
     embed.addFields({
       name: ROLE_LABEL[role] + ' ' + role,
-      value: byRole[role].map(w => '- ' + w.name + (w.build_url ? ' -- [Build](' + w.build_url + ')' : '')).join('\n'),
+      value: lines,
       inline: true
     });
   }
 
+  // Somente players aguardando atribuicao
   const total    = confirmations.length;
   const assigned = confirmations.filter(c => c.assigned_weapon_name).length;
+  const pending  = confirmations.filter(c => !c.assigned_weapon_name);
+
+  if (pending.length > 0) {
+    const lines = pending.map(c => '? <@' + c.user_id + '> -- ' + c.weapon1_name + ' / ' + c.weapon2_name).join('\n');
+    embed.addFields({ name: 'Aguardando atribuicao: ' + pending.length, value: lines, inline: false });
+  }
 
   if (total > 0) {
-    const lines = confirmations.map(c => {
-      if (c.assigned_weapon_name) return 'OK <@' + c.user_id + '> --> ' + c.assigned_weapon_name;
-      return '? <@' + c.user_id + '> -- ' + c.weapon1_name + ' / ' + c.weapon2_name;
-    }).join('\n');
-    embed.addFields({ name: 'Confirmados: ' + total + ' | Atribuidos: ' + assigned, value: lines, inline: false });
+    embed.addFields({ name: 'Confirmados: ' + total + ' | Atribuidos: ' + assigned, value: '\u200b', inline: false });
   } else {
     embed.addFields({ name: 'Confirmados: 0', value: 'Ninguem confirmou presenca ainda.', inline: false });
   }
