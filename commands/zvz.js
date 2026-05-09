@@ -133,26 +133,46 @@ function buildEventEmbed(comp, event, confirmations, weapons) {
     }
   }
 
+  // Separa armas por PT
+  const byPT = { 1: {}, 2: {} };
   for (const role of Object.keys(ROLE_LABEL)) {
-    if (!byRole[role] || !byRole[role].length) continue;
-    const lines = byRole[role].map(w => {
-      const assignedConf = assignedMap[w.id];
-      let line = '- ' + w.name;
-      if (w.build_url) line += ' -- [Build](' + w.build_url + ')';
-      if (assignedConf) line += '\n  --> <@' + assignedConf.user_id + '>';
-      return line;
-    }).join('\n');
-    embed.addFields({
-      name: ROLE_LABEL[role] + ' ' + role,
-      value: lines,
-      inline: true
-    });
+    if (!byRole[role]) continue;
+    for (const w of byRole[role]) {
+      const pt = w.pt || 1;
+      if (!byPT[pt][role]) byPT[pt][role] = [];
+      byPT[pt][role].push(w);
+    }
   }
+
+  function addPTFields(pt) {
+    const ptRoles = byPT[pt];
+    if (!Object.keys(ptRoles).length) return;
+
+    // Separador de PT
+    embed.addFields({ name: '━━━━━━━━━━━━━━━━━━━━━━━━━', value: '**PT ' + pt + '**', inline: false });
+
+    for (const role of Object.keys(ROLE_LABEL)) {
+      if (!ptRoles[role] || !ptRoles[role].length) continue;
+      const lines = ptRoles[role].map(w => {
+        const assignedConf = assignedMap[w.id];
+        let line = '- ' + w.name;
+        if (w.build_url) line += ' -- [Build](' + w.build_url + ')';
+        if (assignedConf) line += '\n  --> <@' + assignedConf.user_id + '>';
+        return line;
+      }).join('\n');
+      embed.addFields({ name: ROLE_LABEL[role] + ' ' + role, value: lines, inline: true });
+    }
+  }
+
+  addPTFields(1);
+  addPTFields(2);
 
   // Somente players aguardando atribuicao
   const total    = confirmations.length;
   const assigned = confirmations.filter(c => c.assigned_weapon_name).length;
   const pending  = confirmations.filter(c => !c.assigned_weapon_name);
+
+  embed.addFields({ name: '━━━━━━━━━━━━━━━━━━━━━━━━━', value: '**Presencas**', inline: false });
 
   if (pending.length > 0) {
     const lines = pending.map(c => '? <@' + c.user_id + '> -- ' + c.weapon1_name + ' / ' + c.weapon2_name).join('\n');
