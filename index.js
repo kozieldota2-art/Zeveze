@@ -48,7 +48,7 @@ client.once('ready', async () => {
 
   try {
     console.log('⏳ Registrando slash commands...');
-    await rest.put(Routes.applicationCommands(client.user.id), { body: commandsJSON });
+    await rest.put(Routes.applicationGuildCommands(client.user.id, '808072941031129099'), { body: commandsJSON });
     console.log('✅ Slash commands registrados!\n');
   } catch (error) {
     console.error('❌ Erro ao registrar commands:', error);
