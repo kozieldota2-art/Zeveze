@@ -6,7 +6,8 @@ const {
   ButtonStyle,
   StringSelectMenuBuilder
 } = require('discord.js');
-const db = require('../database');
+const db     = require('../database');
+const sheets = require('../sheets');
 
 const ROLE_LABEL = {
   'Tank Ofensivo':  '[Tank Of]',
@@ -96,6 +97,18 @@ async function refreshEmbed(client, event) {
   }
 }
 
+// Pega o nome da aba da planilha baseado no nome da comp
+function getSheetName(compName) {
+  const map = {
+    'brawl': 'Brawl Comp',
+    'clap':  'Comp: CLAP LEE',
+    'kite':  'Comp: KITE',
+    'press': 'Full Push',
+    'dive':  'yamizinhu comp',
+  };
+  return map[compName.toLowerCase()] || compName;
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('zvz')
@@ -161,6 +174,9 @@ module.exports = {
     const event   = db.getEventById(eventId);
     if (!event) return;
 
+    const comp = db.getCompById(event.comp_id);
+    const sheetName = getSheetName(comp.name);
+
     if (action === 'zvz_confirmar') {
       if (event.status === 'closed') return interaction.reply({ content: 'Este evento ja foi fechado.', ephemeral: true });
       const weapons = db.getWeaponsByComp(event.comp_id);
@@ -185,15 +201,35 @@ module.exports = {
       const w2Id = parseInt(interaction.values[1]);
       const w1   = db.getWeaponById(w1Id);
       const w2   = db.getWeaponById(w2Id);
+
       db.upsertConfirmation(eventId, interaction.user.id, interaction.user.username, w1Id, w2Id);
-      await interaction.reply({ content: 'Presenca confirmada! Preferencias: ' + w1.name + ' / ' + w2.name + '. Aguarde o caller te atribuir uma arma.', ephemeral: true });
+
+      // Pega numero de confirmacao
+      const confirmations = db.getConfirmationsByEvent(eventId);
+      const number = confirmations.findIndex(c => c.user_id === interaction.user.id) + 1;
+
+      // Atualiza planilha
+      sheets.addConfirmation(sheetName, number, interaction.user.username, w1.name, w2.name).catch(console.error);
+
+      await interaction.reply({
+        content: 'Presenca confirmada! Preferencias: ' + w1.name + ' / ' + w2.name + '. Aguarde o caller te atribuir uma arma.',
+        ephemeral: true
+      });
       await refreshEmbed(interaction.client, db.getEventById(eventId));
     }
 
     if (action === 'zvz_cancelar') {
       const existing = db.getConfirmation(eventId, interaction.user.id);
       if (!existing) return interaction.reply({ content: 'Voce nao esta confirmado neste evento.', ephemeral: true });
+
+      const confirmations = db.getConfirmationsByEvent(eventId);
+      const number = confirmations.findIndex(c => c.user_id === interaction.user.id) + 1;
+
       db.removeConfirmation(eventId, interaction.user.id);
+
+      // Remove da planilha
+      sheets.removeConfirmation(sheetName, number).catch(console.error);
+
       await interaction.reply({ content: 'Sua presenca foi cancelada.', ephemeral: true });
       await refreshEmbed(interaction.client, db.getEventById(eventId));
     }
@@ -257,8 +293,16 @@ module.exports = {
       const weaponId     = parseInt(interaction.values[0]);
       const weapon       = db.getWeaponById(weaponId);
       const conf         = db.getConfirmation(eventId, assignUserId);
+
       db.assignWeapon(eventId, assignUserId, weaponId);
-      await interaction.reply({ content: conf.user_name + ' foi atribuido para ' + weapon.name + '.', ephemeral: true });
+
+      // Atualiza planilha com o player atribuido
+      sheets.assignPlayerToWeapon(sheetName, weapon.name, conf.user_name).catch(console.error);
+
+      await interaction.reply({
+        content: conf.user_name + ' foi atribuido para ' + weapon.name + '.',
+        ephemeral: true
+      });
       await refreshEmbed(interaction.client, db.getEventById(eventId));
     }
 
@@ -268,7 +312,13 @@ module.exports = {
         const fIsOfficer = froleId && interaction.member.roles.cache.has(froleId);
         if (!fIsOfficer) return interaction.reply({ content: 'Apenas o caller ou um officer pode fechar o evento.', ephemeral: true });
       }
+
+      const confirmations = db.getConfirmationsByEvent(eventId);
       db.closeEvent(eventId);
+
+      // Limpa lado esquerdo da planilha
+      sheets.clearConfirmations(sheetName, confirmations.length).catch(console.error);
+
       await interaction.reply({ content: 'Evento fechado! Confirmacoes encerradas.', ephemeral: true });
       await refreshEmbed(interaction.client, db.getEventById(eventId));
     }
