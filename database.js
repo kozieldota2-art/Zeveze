@@ -24,8 +24,10 @@ function initialize() {
       name      TEXT    NOT NULL,
       role      TEXT    NOT NULL DEFAULT 'DPS',
       build_url TEXT    DEFAULT '',
+      pt        INTEGER DEFAULT 1,
       FOREIGN KEY (comp_id) REFERENCES comps(id) ON DELETE CASCADE
     );
+
 
     -- Eventos ZvZ pingados
     CREATE TABLE IF NOT EXISTS zvz_events (
@@ -58,6 +60,8 @@ function initialize() {
       FOREIGN KEY (assigned_weapon_id) REFERENCES weapons(id)
     );
   `);
+  // Migracao segura: adiciona coluna pt se nao existir
+  try { db.exec('ALTER TABLE weapons ADD COLUMN pt INTEGER DEFAULT 1'); } catch(e) {}
   console.log('✅ Banco de dados inicializado!');
 }
 
@@ -85,15 +89,15 @@ function deleteComp(id) {
 
 // ─── WEAPONS ──────────────────────────────────────────────────────────────────
 
-function addWeapon(comp_id, name, role, build_url = '') {
+function addWeapon(comp_id, name, role, build_url = '', pt = 1) {
   return db.prepare(
-    'INSERT INTO weapons (comp_id, name, role, build_url) VALUES (?, ?, ?, ?)'
-  ).run(comp_id, name, role, build_url);
+    'INSERT INTO weapons (comp_id, name, role, build_url, pt) VALUES (?, ?, ?, ?, ?)'
+  ).run(comp_id, name, role, build_url, pt);
 }
 
 function getWeaponsByComp(comp_id) {
   return db.prepare(
-    'SELECT * FROM weapons WHERE comp_id = ? ORDER BY role, name'
+    'SELECT * FROM weapons WHERE comp_id = ? ORDER BY pt, role, name'
   ).all(comp_id);
 }
 
