@@ -8,6 +8,7 @@ const {
 } = require('discord.js');
 const db     = require('../database');
 const sheets = require('../sheets');
+const poller = require('../poller');
 
 const ROLE_LABEL = {
   'Tank Ofensivo':  '[Tank Of]',
@@ -254,6 +255,9 @@ module.exports = {
     });
 
     db.setEventMessageId(eventId, msg.id);
+
+    // Inicia polling da planilha para este evento
+    poller.startPolling(interaction.client, eventId);
   },
 
   async autocomplete(interaction) {
@@ -422,6 +426,9 @@ module.exports = {
       const confirmations = db.getConfirmationsByEvent(eventId);
       db.closeEvent(eventId);
       sheets.clearConfirmations(sheetName, confirmations.length).catch(console.error);
+
+      // Para o polling da planilha
+      poller.stopPolling(eventId);
 
       await interaction.reply({ content: 'Evento fechado! Confirmacoes encerradas.', ephemeral: true });
       await refreshEmbed(interaction.client, db.getEventById(eventId));
