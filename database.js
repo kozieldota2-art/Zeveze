@@ -38,6 +38,7 @@ function initialize() {
       caller_id      TEXT    NOT NULL,
       scheduled_time TEXT    NOT NULL,
       description    TEXT    DEFAULT '',
+      tipo           TEXT    DEFAULT 'normal',
       status         TEXT    DEFAULT 'open',
       created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (comp_id) REFERENCES comps(id)
@@ -60,6 +61,8 @@ function initialize() {
       FOREIGN KEY (assigned_weapon_id) REFERENCES weapons(id)
     );
   `);
+  // Migracao segura: adiciona colunas novas se nao existirem
+  try { db.exec('ALTER TABLE zvz_events ADD COLUMN tipo TEXT DEFAULT \'normal\''); } catch(e) {}
   // Migracao segura: adiciona coluna pt se nao existir
   try { db.exec('ALTER TABLE weapons ADD COLUMN pt INTEGER DEFAULT 1'); } catch(e) {}
   console.log('✅ Banco de dados inicializado!');
@@ -118,11 +121,11 @@ function removeWeapon(id) {
 
 // ─── ZVZ EVENTS ───────────────────────────────────────────────────────────────
 
-function createEvent(comp_id, channel_id, caller_id, scheduled_time, description) {
+function createEvent(comp_id, channel_id, caller_id, scheduled_time, description, tipo = 'normal') {
   return db.prepare(`
-    INSERT INTO zvz_events (comp_id, channel_id, caller_id, scheduled_time, description)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(comp_id, channel_id, caller_id, scheduled_time, description);
+    INSERT INTO zvz_events (comp_id, channel_id, caller_id, scheduled_time, description, tipo)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(comp_id, channel_id, caller_id, scheduled_time, description, tipo);
 }
 
 function setEventMessageId(event_id, message_id) {
@@ -138,6 +141,14 @@ function closeEvent(id) {
 }
 
 // ─── CONFIRMATIONS ────────────────────────────────────────────────────────────
+
+function upsertConfirmationSimples(event_id, user_id, user_name) {
+  return db.prepare(`
+    INSERT INTO confirmations (event_id, user_id, user_name, weapon1_id, weapon2_id)
+    VALUES (?, ?, ?, 0, 0)
+    ON CONFLICT(event_id, user_id) DO UPDATE SET user_name = excluded.user_name
+  `).run(event_id, user_id, user_name);
+}
 
 function upsertConfirmation(event_id, user_id, user_name, weapon1_id, weapon2_id) {
   return db.prepare(`
@@ -193,5 +204,5 @@ module.exports = {
   // Events
   createEvent, setEventMessageId, getEventById, closeEvent,
   // Confirmations
-  upsertConfirmation, getConfirmationsByEvent, getConfirmation, assignWeapon, removeConfirmation
+  upsertConfirmation, upsertConfirmationSimples, getConfirmationsByEvent, getConfirmation, assignWeapon, removeConfirmation
 };
