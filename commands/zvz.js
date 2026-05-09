@@ -100,11 +100,12 @@ async function refreshEmbed(client, event) {
 // Pega o nome da aba da planilha baseado no nome da comp
 function getSheetName(compName) {
   const map = {
-    'brawl': 'Brawl Comp',
-    'clap':  'Comp: CLAP LEE',
-    'kite':  'Comp: KITE',
-    'press': 'Full Push',
-    'dive':  'yamizinhu comp',
+    'kite':         'COMP KITE',
+    'brawl':        'COMP BRAWL',
+    'magrin push':  'COMP MAGRIN PUSH',
+    'yami':         'COMP YAMI',
+    'no lock':      'COMP NO LOCK',
+    'magr1n':       'COMP MAGR1N',
   };
   return map[compName.toLowerCase()] || compName;
 }
