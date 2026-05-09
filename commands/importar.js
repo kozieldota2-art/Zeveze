@@ -67,7 +67,7 @@ module.exports = {
       // Le colunas I (ROLE) e J (ARMA) a partir da linha 4
       const res = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: sheetName + '!I4:J60'
+        range: sheetName + '!I4:K60'
       });
 
       const rows = res.data.values || [];
@@ -79,7 +79,7 @@ module.exports = {
 
       for (const row of rows) {
         const roleStr = (row[0] || '').trim();
-        const arma    = (row[1] || '').trim();
+        const arma    = (row[2] || '').trim();
 
         if (!arma) { ignoradas++; continue; }
 
