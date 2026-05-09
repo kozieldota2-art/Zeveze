@@ -13,7 +13,6 @@ const SHEET_MAP = {
   'magr1n':      'COMP MAGR1N',
 };
 
-// Converte o role da planilha pro role do bot
 function mapRole(roleStr) {
   if (!roleStr) return 'DPS Melee';
   const r = roleStr.toUpperCase().trim();
@@ -51,43 +50,48 @@ module.exports = {
 
     const compName = interaction.options.getString('comp');
     const comp     = db.getCompByName(compName);
-    if (!comp) return interaction.editReply({ content: 'Composicao "' + compName + '" nao encontrada. Crie com /comp criar primeiro.' });
+    if (!comp) return interaction.editReply({ content: 'Composicao "' + compName + '" nao encontrada.' });
 
     const sheetName = SHEET_MAP[compName.toLowerCase()];
-    if (!sheetName) return interaction.editReply({ content: 'Aba da planilha nao mapeada para a comp "' + compName + '".' });
+    if (!sheetName) return interaction.editReply({ content: 'Aba nao mapeada para "' + compName + '".' });
 
     try {
       const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
-      const auth = new google.auth.GoogleAuth({
-        credentials,
-        scopes: ['https://www.googleapis.com/auth/spreadsheets']
-      });
+      const auth   = new google.auth.GoogleAuth({ credentials, scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
       const sheets = google.sheets({ version: 'v4', auth });
 
-      // Le colunas I (ROLE) e J (ARMA) a partir da linha 4
-      const res = await sheets.spreadsheets.values.get({
-        spreadsheetId: SPREADSHEET_ID,
-        range: sheetName + '!I4:K60'
-      });
+      // Le cada coluna separadamente:
+      // I = ROLE, J = PT, L = ARMA
+      const [resRole, resPT, resArma] = await Promise.all([
+        sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: sheetName + '!I4:I60' }),
+        sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: sheetName + '!J4:J60' }),
+        sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: sheetName + '!L4:L60' }),
+      ]);
 
-      const rows = res.data.values || [];
-      if (!rows.length) return interaction.editReply({ content: 'Nao encontrei dados na aba ' + sheetName + '.' });
+      const roleRows = resRole.data.values || [];
+      const ptRows   = resPT.data.values   || [];
+      const armaRows = resArma.data.values || [];
+
+      const maxLen = Math.max(roleRows.length, ptRows.length, armaRows.length);
+      if (!maxLen) return interaction.editReply({ content: 'Nao encontrei dados na aba ' + sheetName + '.' });
 
       let importadas = 0;
       let ignoradas  = 0;
       const importadasList = [];
 
-      for (const row of rows) {
-        const roleStr = (row[0] || '').trim();
-        const arma    = (row[2] || '').trim();
+      for (let i = 0; i < maxLen; i++) {
+        const roleStr = ((roleRows[i] || [])[0] || '').trim();
+        const ptStr   = ((ptRows[i]   || [])[0] || '1').trim();
+        const arma    = ((armaRows[i] || [])[0] || '').trim();
 
         if (!arma) { ignoradas++; continue; }
 
         const role = mapRole(roleStr);
+        const pt   = ptStr === '2' ? 2 : 1;
 
         try {
-          db.addWeapon(comp.id, arma, role, '');
-          importadasList.push(role + ': ' + arma);
+          db.addWeapon(comp.id, arma, role, '', pt);
+          importadasList.push('[PT' + pt + '] ' + role + ': ' + arma);
           importadas++;
         } catch (e) {
           ignoradas++;
@@ -102,18 +106,14 @@ module.exports = {
           { name: 'Aba',        value: sheetName,          inline: true },
           { name: 'Importadas', value: String(importadas), inline: true },
           { name: 'Ignoradas',  value: String(ignoradas),  inline: true },
-          {
-            name: 'Armas importadas',
-            value: importadasList.slice(0, 20).join('\n') || 'Nenhuma',
-            inline: false
-          }
+          { name: 'Armas importadas', value: importadasList.slice(0, 20).join('\n') || 'Nenhuma', inline: false }
         )
-        .setFooter({ text: 'Use /arma listar para conferir todas as armas.' });
+        .setFooter({ text: 'Use /arma listar para conferir.' });
 
       return interaction.editReply({ embeds: [embed] });
 
     } catch (err) {
-      console.error('Erro ao importar da planilha:', err.message);
+      console.error('Erro ao importar:', err.message);
       return interaction.editReply({ content: 'Erro ao acessar a planilha: ' + err.message });
     }
   },
