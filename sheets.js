@@ -59,10 +59,10 @@ async function assignPlayerToWeapon(sheetName, weaponName, playerName) {
   const auth   = getAuth();
   const sheets = google.sheets({ version: 'v4', auth });
 
-  // Le o lado direito da planilha para achar a linha da arma
+  // Le coluna L (ARMA) para achar a linha
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: sheetName + '!J4:J60'
+    range: sheetName + '!L4:L60'
   });
 
   const rows = res.data.values || [];
@@ -81,10 +81,10 @@ async function assignPlayerToWeapon(sheetName, weaponName, playerName) {
     return false;
   }
 
-  // Coluna K = player
+  // Coluna M = player
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: sheetName + '!K' + targetRow,
+    range: sheetName + '!M' + targetRow,
     valueInputOption: 'RAW',
     requestBody: {
       values: [[playerName]]
@@ -114,8 +114,22 @@ async function clearConfirmations(sheetName, total) {
   });
 }
 
+// Adiciona confirmacao simples (taaanque) - so nome na coluna C
+async function addConfirmationSimples(sheetName, number, playerName) {
+  const auth   = getAuth();
+  const sheets = google.sheets({ version: 'v4', auth });
+  const row    = 3 + number;
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: sheetName + '!B' + row + ':C' + row,
+    valueInputOption: 'RAW',
+    requestBody: { values: [[number, playerName]] }
+  });
+}
+
 module.exports = {
   addConfirmation,
+  addConfirmationSimples,
   removeConfirmation,
   assignPlayerToWeapon,
   clearConfirmations
