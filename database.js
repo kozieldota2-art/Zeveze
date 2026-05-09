@@ -84,6 +84,13 @@ function getCompById(id) {
 }
 
 function deleteComp(id) {
+  // Deleta em cascata manualmente
+  const events = db.prepare('SELECT id FROM zvz_events WHERE comp_id = ?').all(id);
+  for (const e of events) {
+    db.prepare('DELETE FROM confirmations WHERE event_id = ?').run(e.id);
+  }
+  db.prepare('DELETE FROM zvz_events WHERE comp_id = ?').run(id);
+  db.prepare('DELETE FROM weapons WHERE comp_id = ?').run(id);
   return db.prepare('DELETE FROM comps WHERE id = ?').run(id);
 }
 
