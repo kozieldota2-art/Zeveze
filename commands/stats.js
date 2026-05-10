@@ -5,11 +5,22 @@ const BASE_URL = 'https://murderledger.albiononline2d.com';
 async function fetchWeapons(playerName, lookbackDays = 9999) {
   const url = BASE_URL + '/api/players/' + encodeURIComponent(playerName) + '/weapons?lookback_days=' + lookbackDays;
   const res = await fetch(url, {
+    method: 'GET',
     headers: {
-      'Accept':          'application/json',
-      'Referer':         BASE_URL + '/',
-      'Origin':          BASE_URL,
-      'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
+      'Accept':                    'application/json, text/plain, */*',
+      'Accept-Language':           'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Accept-Encoding':           'gzip, deflate, br',
+      'Referer':                   BASE_URL + '/players/' + encodeURIComponent(playerName) + '/weapons?lookback_days=' + lookbackDays,
+      'Origin':                    BASE_URL,
+      'Host':                      'murderledger.albiononline2d.com',
+      'Connection':                'keep-alive',
+      'Sec-Fetch-Dest':            'empty',
+      'Sec-Fetch-Mode':            'cors',
+      'Sec-Fetch-Site':            'same-origin',
+      'Sec-Ch-Ua':                 '"Google Chrome";v="120", "Chromium";v="120", "Not-A.Brand";v="24"',
+      'Sec-Ch-Ua-Mobile':          '?0',
+      'Sec-Ch-Ua-Platform':        '"Windows"',
+      'User-Agent':                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
   });
   if (!res.ok) throw new Error('HTTP ' + res.status);
