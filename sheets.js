@@ -25,14 +25,16 @@ async function addConfirmation(sheetName, number, playerName, weapon1, weapon2) 
   const auth   = getAuth();
   const sheets = google.sheets({ version: 'v4', auth });
 
-  const row = 3 + number; // linha 4 = numero 1, linha 5 = numero 2, etc
+  const row      = 3 + number;
+  const statsUrl = 'https://kozieldota2-art.github.io/Zeveze/?player=' + encodeURIComponent(playerName);
 
+  // B=#, C=Players, D=Arma1, E=Arma2, F=USAGES (link)
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: sheetName + '!B' + row + ':E' + row,
-    valueInputOption: 'RAW',
+    range: sheetName + '!B' + row + ':F' + row,
+    valueInputOption: 'USER_ENTERED',
     requestBody: {
-      values: [[number, playerName, weapon1, weapon2]]
+      values: [[number, playerName, weapon1, weapon2, '=HYPERLINK("' + statsUrl + '","Ver Stats")']]
     }
   });
 }
@@ -46,10 +48,10 @@ async function removeConfirmation(sheetName, number) {
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: sheetName + '!B' + row + ':E' + row,
+    range: sheetName + '!B' + row + ':F' + row,
     valueInputOption: 'RAW',
     requestBody: {
-      values: [['', '', '', '']]
+      values: [['', '', '', '', '']]
     }
   });
 }
@@ -59,10 +61,10 @@ async function assignPlayerToWeapon(sheetName, weaponName, playerName) {
   const auth   = getAuth();
   const sheets = google.sheets({ version: 'v4', auth });
 
-  // Le coluna L (ARMA) para achar a linha
+  // Le coluna M (ARMA) para achar a linha
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: sheetName + '!L4:L60'
+    range: sheetName + '!M4:M60'
   });
 
   const rows = res.data.values || [];
@@ -81,10 +83,10 @@ async function assignPlayerToWeapon(sheetName, weaponName, playerName) {
     return false;
   }
 
-  // Coluna M = player
+  // Coluna N = player
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: sheetName + '!M' + targetRow,
+    range: sheetName + '!N' + targetRow,
     valueInputOption: 'RAW',
     requestBody: {
       values: [[playerName]]
@@ -101,14 +103,14 @@ async function clearConfirmations(sheetName, total) {
 
   const rows = [];
   for (let i = 0; i < total; i++) {
-    rows.push(['', '', '', '']);
+    rows.push(['', '', '', '', '']);
   }
 
   if (rows.length === 0) return;
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: sheetName + '!B4:E' + (3 + total),
+    range: sheetName + '!B4:F' + (3 + total),
     valueInputOption: 'RAW',
     requestBody: { values: rows }
   });
@@ -116,14 +118,15 @@ async function clearConfirmations(sheetName, total) {
 
 // Adiciona confirmacao simples (taaanque) - so nome na coluna C
 async function addConfirmationSimples(sheetName, number, playerName) {
-  const auth   = getAuth();
-  const sheets = google.sheets({ version: 'v4', auth });
-  const row    = 3 + number;
+  const auth     = getAuth();
+  const sheets   = google.sheets({ version: 'v4', auth });
+  const row      = 3 + number;
+  const statsUrl = 'https://kozieldota2-art.github.io/Zeveze/?player=' + encodeURIComponent(playerName);
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: sheetName + '!B' + row + ':C' + row,
-    valueInputOption: 'RAW',
-    requestBody: { values: [[number, playerName]] }
+    range: sheetName + '!B' + row + ':E' + row,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [[number, playerName, '', '=HYPERLINK("' + statsUrl + '","Ver Stats")']] }
   });
 }
 
