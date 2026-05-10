@@ -1,511 +1,235 @@
-const {
-  SlashCommandBuilder,
-  EmbedBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  StringSelectMenuBuilder
-} = require('discord.js');
-const { google } = require('googleapis');
-const db         = require('../database');
-const sheets     = require('../sheets');
-const albionApi  = require('../albion_api');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const path = require('path');
 
-const ROLE_LABEL = {
-  'Tank Ofensivo':  '[Tank Of]',
-  'Tank Defensivo': '[Tank Def]',
-  'Healer':         '[Healer]',
-  'DPS Melee':      '[DPS Melee]',
-  'DPS Range':      '[DPS Range]',
-  'Support':        '[Support]',
-  'Battlemount':    '[Mount]',
-};
+const ALBION_API = 'https://gameinfo.albiononline.com/api/gameinfo';
+const TIMEOUT_MS = 8000;
 
-const SHEET_MAP = {
-  'kite':        'COMP KITE',
-  'brawl':       'COMP BRAWL',
-  'magrin push': 'COMP MAGRIN PUSH',
-  'yami':        'COMP YAMI',
-  'no lock':     'COMP NO LOCK',
-  'magr1n':      'COMP MAGR1N',
-};
+// Traducao embutida
+const translation = {"Hallowfall":"Queda Santa","Blight Staff":"Pustulento","Holy Staff":"Cajado Sagrado","Dagger Pair":"Par de Adagas","Rampant Staff":"Rampante","Mace":"Maça 1H","Redemption Staff":"Redenção","Incubus Mace":"Íncubo","Hand of Justice":"Mão da Justiça","Nature Staff":"Cajado da Natureza","Hammer":"Martelo 1H","Longbow":"Arco Longo","Druidic Staff":"Cajado Druídico","Polehammer":"Martelo de Batalha","Occult Staff":"Oculto","Staff of Balance":"Cajado do Equilíbrio","Bedrock Mace":"Maça Pétrea","Great Arcane Staff":"Arcano Elevado","Bloodletter":"Dessangradora","Exalted Staff":"Exaltado","Oathkeepers":"Jurador","Dreadstorm Monarch":"Monarca Tempestuoso","Astral Staff":"Astral","Lifecurse Staff":"Execrado","Grovekeeper":"Guarda Bosque","Dagger":"Adaga","Witchwork Staff":"Feiticeiro","Malevolent Locus":"Locus","Arcane Staff":"Arcano Silence","Great Holy Staff":"Sagrado Elevado","Divine Staff":"Cajado Divino","Permafrost Prism":"Prisma","Frost Staff":"Cajado de Gelo","Deathgivers":"Mortíficos","Claws":"Garras","Black Monk Stave":"Monge Negro","Realmbreaker":"Quebra reino","Dawnsong":"Canção da Alvorada","Shadowcaller":"Chama-sombra","Bear Paws":"Patas de Urso","Spirithunter":"Caça espíritos","Carrioncaller":"Chama corpos","Tombhammer":"Martelo Tumular","Mistpiercer":"Furabruma","Bow of Badon":"Badon","Siegebow":"Arco de Cerco","Weeping Repeater":"Repetidor Lamentoso","Boltcasters":"Lançadores de Dardos","Galatines":"Galatinas","Kingmaker":"Cria-reis","Vendetta's Wrath":"Cajado de Fogo Virulento","Infernal Scythe":"Segadeira","Ghostfang":"Presa Demoníaca","Hellion Hands":"Mãos Pretas","Broadsword":"Espada Larga","Claymore":"Montante","Dual Swords":"Espadas Duplas","Carving Sword":"Espada Entalhada","Battle Axe":"Machado de Guerra","Great Axe":"Machadão","Halberd":"Alabarda","Spear":"Lança","Pike":"Pique","Glaive":"Archa","Crystal Reaper":"Archa Fraturada","Heron Spear":"Garceira","Trinity Spear":"Lança Trina","Warhammer":"Martelo de Guerra","Great Hammer":"Martelo Pesado","Forge Hammers":"Martelos de Forja","Crossbow":"Besta","Heavy Crossbow":"Besta Pesada","Light Crossbow":"Besta Leve","Bow":"Arco","Warbow":"Arco de Guerra","Wailing Bow":"Plangente","Whispering Bow":"Arco Sussurrante","Shortsword":"Espada Curta","Sword":"Espada","Rapier":"Rapieira","Cursed Staff":"Cajado Amaldiçoado","Great Cursed Staff":"Cajado Amaldiçoado Elevado","Fire Staff":"Cajado de Fogo","Great Fire Staff":"Cajado de Fogo Elevado","Blazing Staff":"Cajado Fulgurante","Wildfire Staff":"Cajado do Fogo Selvagem","Brimstone Staff":"Cajado Sulfuroso","Great Frost Staff":"Cajado de Gelo Elevado","Glacial Staff":"Cajado Glacial","Hoarfrost Staff":"Cajado Gélido","Great Nature Staff":"Cajado da Natureza Elevado","Ironroot Staff":"Cajado Férreo","Enigmatic Staff":"Cajado Enigmático","Demonic Staff":"Cajado Demoníaco","Reaper":"Segadeira","Double Bladed Staff":"Cajado de Dupla Lâmina","Primal Staff":"Cajado Primordial","Mistcaller":"Chamador de Névoa","Spiked Gauntlets":"Manoplas Cravadas","Brawlers":"Braçadeiras","Morning Star":"Estrela da Manhã","Scimitar":"Lâmina Aclarada","Katar":"Fúria Contida","Sickle Pair":"Gêmeas Aniquiladoras"};
 
-function getSheetName(compName) {
-  return SHEET_MAP[compName.toLowerCase()] || compName;
+// Tenta carregar JSON externo se existir
+try {
+  const ext = require(path.join(__dirname, '..', 'weapons_translation.json'));
+  Object.assign(translation, ext);
+} catch(e) {}
+
+function traduzir(nomeEN) {
+  return translation[nomeEN] || nomeEN;
 }
 
-function isCaller(interaction) {
-  const roleId = process.env.CALLER_ROLE_ID;
-  if (!roleId) {
-    const officerRoleId = process.env.OFFICER_ROLE_ID;
-    if (!officerRoleId) return true;
-    return interaction.member.roles.cache.has(officerRoleId);
-  }
-  return interaction.member.roles.cache.has(roleId);
-}
-
-// ─── POLLER INLINE ────────────────────────────────────────────────────────────
-const activePollers = {};
-
-function startPolling(client, eventId) {
-  if (activePollers[eventId]) return;
-  console.log('[Poller] Iniciando evento ' + eventId);
-  activePollers[eventId] = setInterval(() => pollEvent(client, eventId), 30000);
-}
-
-function stopPolling(eventId) {
-  if (activePollers[eventId]) {
-    clearInterval(activePollers[eventId]);
-    delete activePollers[eventId];
-    console.log('[Poller] Encerrado evento ' + eventId);
-  }
-}
-
-async function pollEvent(client, eventId) {
-  const event = db.getEventById(eventId);
-  if (!event || event.status === 'closed') { stopPolling(eventId); return; }
-
-  const comp      = db.getCompById(event.comp_id);
-  const sheetName = getSheetName(comp.name);
-  const weapons   = db.getWeaponsByComp(event.comp_id);
-
+// Fetch com timeout
+async function fetchWithTimeout(url, ms) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
   try {
-    const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
-    const auth   = new google.auth.GoogleAuth({ credentials, scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
-    const sheetsApi = google.sheets({ version: 'v4', auth });
-
-    const res = await sheetsApi.spreadsheets.values.get({
-      spreadsheetId: process.env.SPREADSHEET_ID,
-      range: sheetName + '!L4:M60'
-    });
-
-    const rows = res.data.values || [];
-    let updated = false;
-
-    for (const row of rows) {
-      const armaName   = (row[0] || '').trim();  // coluna L = ARMA
-      const playerName = (row[1] || '').trim();  // coluna M = PLAYER
-      if (!armaName || !playerName) continue;
-
-      const weapon = weapons.find(w => w.name.toLowerCase() === armaName.toLowerCase());
-      if (!weapon) continue;
-
-      const confirmations = db.getConfirmationsByEvent(eventId);
-      const conf = confirmations.find(c =>
-        c.user_name.toLowerCase() === playerName.toLowerCase() &&
-        (!c.assigned_weapon_id || c.assigned_weapon_id !== weapon.id)
-      );
-      if (!conf) continue;
-
-      db.assignWeapon(eventId, conf.user_id, weapon.id);
-      updated = true;
-      console.log('[Poller] ' + playerName + ' -> ' + armaName);
-    }
-
-    if (updated) await refreshEmbed(client, db.getEventById(eventId));
-  } catch (err) {
-    console.error('[Poller] Erro:', err.message);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+    return res;
+  } catch(e) {
+    clearTimeout(timer);
+    throw e;
   }
 }
 
-// ─── EMBED ────────────────────────────────────────────────────────────────────
-function buildEventEmbed(comp, event, confirmations, weapons) {
-  const byRole = {};
-  for (const w of weapons) {
-    if (!byRole[w.role]) byRole[w.role] = [];
-    byRole[w.role].push(w);
-  }
-
-  const embed = new EmbedBuilder()
-    .setColor(0xFF4444)
-    .setTitle('ZVZ CALL -- ' + comp.name.toUpperCase())
-    .setDescription(event.description || 'Confirme sua presenca clicando no botao abaixo.')
-    .addFields(
-      { name: 'Horario', value: event.scheduled_time, inline: true },
-      { name: 'Caller',  value: '<@' + event.caller_id + '>', inline: true },
-      { name: 'Status',  value: event.status === 'open' ? 'Aberto' : 'Fechado', inline: true }
-    );
-
-  // Monta mapa de weapon_id -> player atribuido
-  const assignedMap = {};
-  for (const c of confirmations) {
-    if (c.assigned_weapon_name && c.assigned_weapon_id) {
-      assignedMap[c.assigned_weapon_id] = c;
-    }
-  }
-
-  // Separa armas por PT
-  const byPT = { 1: {}, 2: {} };
-  for (const role of Object.keys(ROLE_LABEL)) {
-    if (!byRole[role]) continue;
-    for (const w of byRole[role]) {
-      const pt = w.pt || 1;
-      if (!byPT[pt][role]) byPT[pt][role] = [];
-      byPT[pt][role].push(w);
-    }
-  }
-
-  function addPTFields(pt) {
-    const ptRoles = byPT[pt];
-    if (!Object.keys(ptRoles).length) return;
-
-    // Separador de PT
-    embed.addFields({ name: '━━━━━━━━━━━━━━━━━━━━━━━━━', value: '**PT ' + pt + '**', inline: false });
-
-    for (const role of Object.keys(ROLE_LABEL)) {
-      if (!ptRoles[role] || !ptRoles[role].length) continue;
-      const lines = ptRoles[role].map(w => {
-        const assignedConf = assignedMap[w.id];
-        let line = '- ' + w.name;
-        if (w.build_url) line += ' -- [Build](' + w.build_url + ')';
-        if (assignedConf) line += '\n  --> <@' + assignedConf.user_id + '>';
-        return line;
-      }).join('\n');
-      embed.addFields({ name: ROLE_LABEL[role] + ' ' + role, value: lines, inline: true });
-    }
-  }
-
-  addPTFields(1);
-  addPTFields(2);
-
-  // Somente players aguardando atribuicao
-  const total    = confirmations.length;
-  const assigned = confirmations.filter(c => c.assigned_weapon_name).length;
-  const pending  = confirmations.filter(c => !c.assigned_weapon_name);
-
-  embed.addFields({ name: '━━━━━━━━━━━━━━━━━━━━━━━━━', value: '**Presencas**', inline: false });
-
-  if (pending.length > 0) {
-    const lines = pending.map(c => '? <@' + c.user_id + '> -- ' + c.weapon1_name + ' / ' + c.weapon2_name).join('\n');
-    embed.addFields({ name: 'Aguardando atribuicao: ' + pending.length, value: lines, inline: false });
-  }
-
-  if (total > 0) {
-    // No tipo taaanque mostra so lista de presentes
-    if (event.tipo === 'taaanque') {
-      const lines = confirmations.map((c, i) => (i+1) + '. <@' + c.user_id + '>').join('\n');
-      embed.addFields({ name: 'Confirmados: ' + total, value: lines, inline: false });
-    } else {
-      embed.addFields({ name: 'Confirmados: ' + total + ' | Atribuidos: ' + assigned, value: '\u200b', inline: false });
-    }
-  } else {
-    embed.addFields({ name: 'Confirmados: 0', value: 'Ninguem confirmou presenca ainda.', inline: false });
-  }
-
-  embed.setFooter({ text: 'ID do Evento: ' + event.id });
-  return embed;
+async function getPlayerId(playerName) {
+  const res = await fetchWithTimeout(ALBION_API + '/search?q=' + encodeURIComponent(playerName), TIMEOUT_MS);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  const players = data.players || [];
+  const player = players.find(p => p.Name.toLowerCase() === playerName.toLowerCase()) || players[0];
+  if (!player) throw new Error('Player "' + playerName + '" nao encontrado na API do Albion.');
+  return { id: player.Id, name: player.Name };
 }
 
-function buildEventButtons(eventId, isClosed) {
-  if (isClosed === undefined) isClosed = false;
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('zvz_confirmar:' + eventId).setLabel('Confirmar Presenca').setStyle(ButtonStyle.Success).setDisabled(isClosed),
-    new ButtonBuilder().setCustomId('zvz_cancelar:'  + eventId).setLabel('Cancelar Presenca').setStyle(ButtonStyle.Secondary).setDisabled(isClosed),
-    new ButtonBuilder().setCustomId('zvz_atribuir:'  + eventId).setLabel('Atribuir (Caller)').setStyle(ButtonStyle.Primary).setDisabled(isClosed),
-    new ButtonBuilder().setCustomId('zvz_fechar:'    + eventId).setLabel('Fechar Evento').setStyle(ButtonStyle.Danger).setDisabled(isClosed)
-  );
-}
-
-function buildTaaanqueButtons(eventId, isClosed) {
-  if (isClosed === undefined) isClosed = false;
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('zvz_taaanque_confirmar:' + eventId).setLabel('Confirmar Presenca').setStyle(ButtonStyle.Success).setDisabled(isClosed),
-    new ButtonBuilder().setCustomId('zvz_taaanque_cancelar:'  + eventId).setLabel('Cancelar Presenca').setStyle(ButtonStyle.Secondary).setDisabled(isClosed),
-    new ButtonBuilder().setCustomId('zvz_fechar:'             + eventId).setLabel('Fechar Evento').setStyle(ButtonStyle.Danger).setDisabled(isClosed)
-  );
-}
-
-async function refreshEmbed(client, event) {
-  try {
-    const comp          = db.getCompById(event.comp_id);
-    const confirmations = db.getConfirmationsByEvent(event.id);
-    const weapons       = db.getWeaponsByComp(event.comp_id);
-    const embed         = buildEventEmbed(comp, event, confirmations, weapons);
-    const buttons       = buildEventButtons(event.id, event.status === 'closed');
-    const channel       = await client.channels.fetch(event.channel_id);
-    const message       = await channel.messages.fetch(event.message_id);
-    await message.edit({ embeds: [embed], components: [buttons] });
-  } catch (err) {
-    console.error('Erro ao atualizar embed:', err.message);
+async function getWeaponUsage(playerId) {
+  const res = await fetchWithTimeout(ALBION_API + '/players/' + playerId + '/kills?limit=51&offset=0', TIMEOUT_MS);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const kills = await res.json();
+  const weaponCount = {};
+  for (const kill of kills) {
+    const tipo = kill?.Killer?.Equipment?.MainHand?.Type || '';
+    if (!tipo) continue;
+    weaponCount[tipo] = (weaponCount[tipo] || 0) + 1;
   }
+  return { weaponCount, total: kills.length };
 }
 
-// ─── PAGINACAO ────────────────────────────────────────────────────────────────
-function buildWeaponSelect(customId, weapons, page, confirmation) {
-  const PAGE_SIZE  = 23;
-  const totalPages = Math.ceil(weapons.length / PAGE_SIZE);
-  const start      = page * PAGE_SIZE;
-  const pageWeapons = weapons.slice(start, start + PAGE_SIZE);
+// Mapeia item ID (ex: T8_MAIN_HOLYSTAFF_AVALON) -> nome PT
+function itemIdToName(itemId) {
+  const clean = itemId.replace(/^T\d+_/, '').replace(/@\d+$/, '');
 
-  const select = new StringSelectMenuBuilder()
-    .setCustomId(customId)
-    .setPlaceholder('Pagina ' + (page + 1) + '/' + totalPages + ' -- Escolha uma arma')
-    .setMinValues(1).setMaxValues(1)
-    .addOptions(pageWeapons.map(w => {
-      const isPref = confirmation && (w.id === confirmation.weapon1_id || w.id === confirmation.weapon2_id);
-      return {
-        label: (isPref ? '[PREF] ' : '') + w.name.substring(0, 90),
-        description: (w.role + (isPref ? ' -- Preferencia' : '')).substring(0, 100),
-        value: String(w.id)
-      };
-    }));
+  // Mapa direto de codigos internos para nomes EN
+  const codeMap = {
+    'MAIN_HOLYSTAFF_AVALON':      'Hallowfall',
+    '2H_NATURESTAFF_HELL':        'Blight Staff',
+    'MAIN_HOLYSTAFF':             'Holy Staff',
+    '2H_DAGGERPAIR':              'Dagger Pair',
+    '2H_NATURESTAFF_KEEPER':      'Rampant Staff',
+    'MAIN_MACE':                  'Mace',
+    '2H_HOLYSTAFF_UNDEAD':        'Redemption Staff',
+    'MAIN_MACE_HELL':             'Incubus Mace',
+    '2H_HAMMER_AVALON':           'Hand of Justice',
+    'MAIN_NATURESTAFF':           'Nature Staff',
+    'MAIN_HAMMER':                'Hammer',
+    '2H_LONGBOW':                 'Longbow',
+    'MAIN_NATURESTAFF_KEEPER':    'Druidic Staff',
+    '2H_POLEHAMMER':              'Polehammer',
+    '2H_ARCANESTAFF_HELL':        'Occult Staff',
+    '2H_ROCKSTAFF_KEEPER':        'Staff of Balance',
+    'MAIN_ROCKMACE_KEEPER':       'Bedrock Mace',
+    '2H_ARCANESTAFF':             'Great Arcane Staff',
+    'MAIN_RAPIER_MORGANA':        'Bloodletter',
+    '2H_HOLYSTAFF_CRYSTAL':       'Exalted Staff',
+    '2H_DUALMACE_AVALON':         'Oathkeepers',
+    'MAIN_MACE_CRYSTAL':          'Dreadstorm Monarch',
+    '2H_ARCANESTAFF_CRYSTAL':     'Astral Staff',
+    'MAIN_CURSEDSTAFF_UNDEAD':    'Lifecurse Staff',
+    '2H_RAM_KEEPER':              'Grovekeeper',
+    'MAIN_DAGGER':                'Dagger',
+    'MAIN_ARCANESTAFF_UNDEAD':    'Witchwork Staff',
+    '2H_ENIGMATICORB_MORGANA':    'Malevolent Locus',
+    'MAIN_ARCANESTAFF':           'Arcane Staff',
+    '2H_HOLYSTAFF':               'Great Holy Staff',
+    '2H_DIVINESTAFF':             'Divine Staff',
+    '2H_ICECRYSTAL_UNDEAD':       'Permafrost Prism',
+    'MAIN_FROSTSTAFF':            'Frost Staff',
+    '2H_DUALSICKLE_UNDEAD':       'Deathgivers',
+    '2H_CLAWPAIR':                'Claws',
+    '2H_COMBATSTAFF_MORGANA':     'Black Monk Stave',
+    '2H_AXE_AVALON':              'Realmbreaker',
+    '2H_FIRE_RINGPAIR_AVALON':    'Dawnsong',
+    'MAIN_CURSEDSTAFF_AVALON':    'Shadowcaller',
+    '2H_KNUCKLES_KEEPER':         'Bear Paws',
+    '2H_SPEAR_UNDEAD':            'Spirithunter',
+    '2H_HALBERD_MORGANA':         'Carrioncaller',
+    '2H_HAMMER_UNDEAD':           'Tombhammer',
+    '2H_CROSSBOW_UNDEAD':         'Mistpiercer',
+    '2H_BOW_KEEPER':              'Bow of Badon',
+    '2H_CROSSBOWLARGE':           'Siegebow',
+    '2H_REPEATINGCROSSBOW_UNDEAD':'Weeping Repeater',
+    '2H_CROSSBOW_AVALON':         'Boltcasters',
+    '2H_CLAYMORE_AVALON':         'Kingmaker',
+    'MAIN_SCIMITAR_MORGANA':      'Scimitar',
+    '2H_DAGGER_KATAR_AVALON':     'Katar',
+    '2H_DAGGERPAIR_CRYSTAL':      'Sickle Pair',
+    '2H_GLAIVE':                  'Glaive',
+    '2H_GLAIVE_CRYSTAL':          'Crystal Reaper',
+    'MAIN_SPEAR':                 'Spear',
+    '2H_SPEAR':                   'Pike',
+    'MAIN_SPEAR_CRYSTAL':         'Heron Spear',
+    '2H_SPEAR_CRYSTAL':           'Trinity Spear',
+    'MAIN_AXE':                   'Battle Axe',
+    '2H_AXE':                     'Great Axe',
+    '2H_HALBERD':                 'Halberd',
+    'MAIN_SWORD':                 'Sword',
+    '2H_CLAYMORE':                'Claymore',
+    '2H_DUALSWORD':               'Dual Swords',
+    'MAIN_SWORD_UNDEAD':          'Carving Sword',
+    '2H_CLAYMORE_MORGANA':        'Broadsword',
+    'MAIN_HAMMER':                'Hammer',
+    '2H_HAMMER':                  'Great Hammer',
+    '2H_POLEHAMMER':              'Polehammer',
+    'MAIN_MACE':                  'Mace',
+    '2H_MACE':                    'Heavy Mace',
+    'MAIN_BOW':                   'Bow',
+    '2H_BOW':                     'Warbow',
+    '2H_BOW_UNDEAD':              'Wailing Bow',
+    'MAIN_BOW_KEEPER':            'Whispering Bow',
+    'MAIN_CROSSBOW':              'Crossbow',
+    '2H_CROSSBOW':                'Heavy Crossbow',
+    'MAIN_CROSSBOW_UNDEAD':       'Light Crossbow',
+    'MAIN_CURSEDSTAFF':           'Cursed Staff',
+    '2H_CURSEDSTAFF':             'Great Cursed Staff',
+    'MAIN_DEMONICSTAFF':          'Demonic Staff',
+    'MAIN_FIRESTAFF':             'Fire Staff',
+    '2H_FIRESTAFF':               'Great Fire Staff',
+    '2H_INFERNOSTAFF_MORGANA':    'Blazing Staff',
+    '2H_FIRESTAFF_KEEPER':        'Wildfire Staff',
+    '2H_FIRESTAFF_UNDEAD':        'Brimstone Staff',
+    'MAIN_FROSTSTAFF':            'Frost Staff',
+    '2H_FROSTSTAFF':              'Great Frost Staff',
+    '2H_FROSTSTAFF_UNDEAD':       'Glacial Staff',
+    '2H_FROSTSTAFF_KEEPER':       'Hoarfrost Staff',
+    'MAIN_ARCANESTAFF':           'Arcane Staff',
+    '2H_ARCANESTAFF':             'Great Arcane Staff',
+    '2H_ENIGMATICSTAFF':          'Enigmatic Staff',
+    'MAIN_NATURESTAFF':           'Nature Staff',
+    '2H_NATURESTAFF':             'Great Nature Staff',
+    '2H_IRONROOTSTAFF_KEEPER':    'Ironroot Staff',
+    'MAIN_HOLYSTAFF':             'Holy Staff',
+    '2H_HOLYSTAFF':               'Great Holy Staff',
+    '2H_DIVINESTAFF':             'Divine Staff',
+    '2H_PRIMALSTAFF':             'Primal Staff',
+  };
 
-  const rows = [new ActionRowBuilder().addComponents(select)];
-  const [prefix, eventId, extra] = customId.split(':');
-  const navButtons = [];
-
-  if (page > 0) navButtons.push(
-    new ButtonBuilder().setCustomId(prefix + '_prev:' + eventId + ':' + (extra || '') + ':' + (page - 1)).setLabel('Pagina Anterior').setStyle(ButtonStyle.Secondary)
-  );
-  if (page < totalPages - 1) navButtons.push(
-    new ButtonBuilder().setCustomId(prefix + '_next:' + eventId + ':' + (extra || '') + ':' + (page + 1)).setLabel('Proxima Pagina').setStyle(ButtonStyle.Primary)
-  );
-  if (navButtons.length) rows.push(new ActionRowBuilder().addComponents(navButtons));
-
-  return rows;
+  const enName = codeMap[clean];
+  if (enName) return traduzir(enName);
+  return clean;
 }
 
-function buildConfirmSelect(eventId, weapons, page) {
-  const PAGE_SIZE  = 23;
-  const totalPages = Math.ceil(weapons.length / PAGE_SIZE);
-  const start      = page * PAGE_SIZE;
-  const pageWeapons = weapons.slice(start, start + PAGE_SIZE);
-
-  const select = new StringSelectMenuBuilder()
-    .setCustomId('zvz_selecionar:' + eventId)
-    .setPlaceholder('Pagina ' + (page + 1) + '/' + totalPages + ' -- Escolha 2 armas')
-    .setMinValues(2).setMaxValues(Math.min(2, pageWeapons.length))
-    .addOptions(pageWeapons.map(w => ({ label: w.name.substring(0, 100), description: w.role, value: String(w.id) })));
-
-  const rows = [new ActionRowBuilder().addComponents(select)];
-  const navButtons = [];
-
-  if (page > 0) navButtons.push(
-    new ButtonBuilder().setCustomId('zvz_confirmar_prev:' + eventId + ':' + (page - 1)).setLabel('Pagina Anterior').setStyle(ButtonStyle.Secondary)
-  );
-  if (page < totalPages - 1) navButtons.push(
-    new ButtonBuilder().setCustomId('zvz_confirmar_next:' + eventId + ':' + (page + 1)).setLabel('Proxima Pagina').setStyle(ButtonStyle.Primary)
-  );
-  if (navButtons.length) rows.push(new ActionRowBuilder().addComponents(navButtons));
-
-  return rows;
-}
-
-// ─── MODULO ───────────────────────────────────────────────────────────────────
 module.exports = {
   data: new SlashCommandBuilder()
-    .setName('zvz')
-    .setDescription('Comandos de ZvZ')
-    .addSubcommand(sub => sub
-      .setName('ping')
-      .setDescription('Pingar um evento ZvZ para a guilda')
-      .addStringOption(opt => opt.setName('tipo').setDescription('Tipo do ping').setRequired(true).addChoices(
-        { name: 'Normal (com escolha de armas)', value: 'normal' },
-        { name: 'Taaanque (so presenca)', value: 'taaanque' }
-      ))
-      .addStringOption(opt => opt.setName('comp').setDescription('Composicao da ZvZ').setRequired(true).setAutocomplete(true))
-      .addStringOption(opt => opt.setName('horario').setDescription('Horario do evento (ex: 20:00 BRT)').setRequired(true))
-      .addStringOption(opt => opt.setName('descricao').setDescription('Detalhes do evento').setRequired(false))
-      .addRoleOption(opt => opt.setName('cargo').setDescription('Cargo a mencionar').setRequired(false))
+    .setName('stats')
+    .setDescription('Busca stats de arma do player no Albion')
+    .addStringOption(opt => opt
+      .setName('player')
+      .setDescription('Nome do player no Albion')
+      .setRequired(true)
+    )
+    .addStringOption(opt => opt
+      .setName('arma')
+      .setDescription('Filtrar por arma especifica (opcional)')
+      .setRequired(false)
     ),
 
   async execute(interaction) {
-    if (!isCaller(interaction)) {
-      return interaction.reply({ content: 'Voce nao tem permissao para pingar ZvZ.', ephemeral: true });
-    }
+    await interaction.deferReply({ ephemeral: true });
 
-    const compName = interaction.options.getString('comp');
-    const comp     = db.getCompByName(compName);
-    if (!comp) return interaction.reply({ content: 'Composicao ' + compName + ' nao encontrada.', ephemeral: true });
+    const playerName = interaction.options.getString('player');
+    const armaFiltro = interaction.options.getString('arma')?.toLowerCase() || null;
 
-    const weapons = db.getWeaponsByComp(comp.id);
-    if (weapons.length < 2) return interaction.reply({ content: 'A composicao precisa ter pelo menos 2 armas.', ephemeral: true });
+    try {
+      const player = await getPlayerId(playerName);
+      const { weaponCount, total } = await getWeaponUsage(player.id);
 
-    const tipo      = interaction.options.getString('tipo');
-    const horario   = interaction.options.getString('horario');
-    const descricao = interaction.options.getString('descricao') || '';
-    const cargo     = interaction.options.getRole('cargo');
-
-    const result  = db.createEvent(comp.id, interaction.channelId, interaction.user.id, horario, descricao, tipo);
-    const eventId = result.lastInsertRowid;
-    const event   = db.getEventById(eventId);
-    const embed   = buildEventEmbed(comp, event, [], weapons);
-    const buttons = tipo === 'taaanque' ? buildTaaanqueButtons(eventId) : buildEventButtons(eventId);
-    const mention = cargo ? cargo.toString() + ' ' : '';
-
-    const msg = await interaction.reply({
-      content: 'ZVZ CALL! ' + (tipo === 'taaanque' ? '[TAAANQUE] ' : '') + mention,
-      embeds: [embed],
-      components: [buttons],
-      fetchReply: true
-    });
-
-    db.setEventMessageId(eventId, msg.id);
-    startPolling(interaction.client, eventId);
-  },
-
-  async autocomplete(interaction) {
-    const value = interaction.options.getFocused().toLowerCase();
-    const comps = db.getAllComps()
-      .filter(c => c.name.toLowerCase().includes(value))
-      .slice(0, 25)
-      .map(c => ({ name: c.name, value: c.name }));
-    await interaction.respond(comps);
-  },
-
-  async handleInteraction(interaction, prefix) {
-    if (!prefix.startsWith('zvz_')) return;
-
-    const parts   = interaction.customId.split(':');
-    const action  = parts[0];
-    const eventId = parseInt(parts[1]);
-    const extra   = parts[2];
-    const extra2  = parts[3];
-    const event   = db.getEventById(eventId);
-    if (!event) return;
-
-    const comp      = db.getCompById(event.comp_id);
-    const sheetName = getSheetName(comp.name);
-    const weapons   = db.getWeaponsByComp(event.comp_id);
-
-    // ── TAAANQUE: CONFIRMAR PRESENCA SIMPLES ────────────────────────────────────
-    if (action === 'zvz_taaanque_confirmar') {
-      if (event.status === 'closed') return interaction.reply({ content: 'Este evento ja foi fechado.', ephemeral: true });
-
-      const existing = db.getConfirmation(eventId, interaction.user.id);
-      if (existing) return interaction.reply({ content: 'Voce ja confirmou presenca neste evento.', ephemeral: true });
-
-      // Usa weapon1_id e weapon2_id como 0 (nao se aplica no taaanque)
-      db.upsertConfirmationSimples(eventId, interaction.user.id, interaction.member.displayName);
-
-      const confirmations = db.getConfirmationsByEvent(eventId);
-      const number = confirmations.length;
-      sheets.addConfirmationSimples(sheetName, number, interaction.member.displayName).catch(console.error);
-
-      await interaction.reply({ content: 'Presenca confirmada!', ephemeral: true });
-      await refreshEmbed(interaction.client, db.getEventById(eventId));
-      return;
-    }
-
-    // ── TAAANQUE: CANCELAR PRESENCA SIMPLES ──────────────────────────────────
-    if (action === 'zvz_taaanque_cancelar') {
-      const existing = db.getConfirmation(eventId, interaction.user.id);
-      if (!existing) return interaction.reply({ content: 'Voce nao esta confirmado neste evento.', ephemeral: true });
-
-      const confirmations = db.getConfirmationsByEvent(eventId);
-      const number = confirmations.findIndex(c => c.user_id === interaction.user.id) + 1;
-
-      db.removeConfirmation(eventId, interaction.user.id);
-      sheets.removeConfirmation(sheetName, number).catch(console.error);
-
-      await interaction.reply({ content: 'Sua presenca foi cancelada.', ephemeral: true });
-      await refreshEmbed(interaction.client, db.getEventById(eventId));
-      return;
-    }
-
-    if (action === 'zvz_confirmar') {
-      if (event.status === 'closed') return interaction.reply({ content: 'Este evento ja foi fechado.', ephemeral: true });
-      if (weapons.length < 2) return interaction.reply({ content: 'Nao ha armas suficientes.', ephemeral: true });
-      return interaction.reply({ content: 'Selecione 2 armas que voce consegue jogar:', components: buildConfirmSelect(eventId, weapons, 0), ephemeral: true });
-    }
-
-    if (action === 'zvz_confirmar_prev' || action === 'zvz_confirmar_next') {
-      return interaction.update({ content: 'Selecione 2 armas que voce consegue jogar:', components: buildConfirmSelect(eventId, weapons, parseInt(extra) || 0) });
-    }
-
-    if (action === 'zvz_selecionar') {
-      const w1Id = parseInt(interaction.values[0]);
-      const w2Id = parseInt(interaction.values[1]);
-      const w1   = db.getWeaponById(w1Id);
-      const w2   = db.getWeaponById(w2Id);
-
-      db.upsertConfirmation(eventId, interaction.user.id, interaction.member.displayName, w1Id, w2Id);
-
-      const confirmations = db.getConfirmationsByEvent(eventId);
-      const number = confirmations.findIndex(c => c.user_id === interaction.user.id) + 1;
-      sheets.addConfirmation(sheetName, number, interaction.member.displayName, w1.name, w2.name).catch(console.error);
-
-      // Busca stats do player em background (nao bloqueia)
-      albionApi.fetchAndCacheStats(interaction.user.id, interaction.member.displayName, interaction.member.displayName).catch(() => {});
-
-      await interaction.reply({ content: 'Presenca confirmada! Preferencias: ' + w1.name + ' / ' + w2.name + '. Aguarde o caller te atribuir uma arma.', ephemeral: true });
-      await refreshEmbed(interaction.client, db.getEventById(eventId));
-    }
-
-    if (action === 'zvz_cancelar') {
-      const existing = db.getConfirmation(eventId, interaction.user.id);
-      if (!existing) return interaction.reply({ content: 'Voce nao esta confirmado neste evento.', ephemeral: true });
-      const confirmations = db.getConfirmationsByEvent(eventId);
-      const number = confirmations.findIndex(c => c.user_id === interaction.user.id) + 1;
-      db.removeConfirmation(eventId, interaction.user.id);
-      sheets.removeConfirmation(sheetName, number).catch(console.error);
-      await interaction.reply({ content: 'Sua presenca foi cancelada.', ephemeral: true });
-      await refreshEmbed(interaction.client, db.getEventById(eventId));
-    }
-
-    if (action === 'zvz_atribuir') {
-      if (interaction.user.id !== event.caller_id) {
-        const officerRoleId = process.env.OFFICER_ROLE_ID;
-        const isOfficer = officerRoleId && interaction.member.roles.cache.has(officerRoleId);
-        if (!isOfficer) return interaction.reply({ content: 'Apenas o caller ou um officer pode atribuir armas.', ephemeral: true });
+      if (!Object.keys(weaponCount).length) {
+        return interaction.editReply({ content: 'Nenhum kill encontrado para **' + player.name + '**.' });
       }
-      const confirmations = db.getConfirmationsByEvent(eventId);
-      if (!confirmations.length) return interaction.reply({ content: 'Nenhum player confirmou presenca ainda.', ephemeral: true });
 
-      const playerSelect = new StringSelectMenuBuilder()
-        .setCustomId('zvz_escolher_player:' + eventId)
-        .setPlaceholder('Selecione o player para atribuir arma')
-        .addOptions(confirmations.slice(0, 25).map(c => ({
-          label: c.user_name.substring(0, 100),
-          description: (c.weapon1_name + ' / ' + c.weapon2_name + (c.assigned_weapon_name ? ' --> ' + c.assigned_weapon_name : '')).substring(0, 100),
-          value: c.user_id
-        })));
+      let sorted = Object.entries(weaponCount).sort(([,a],[,b]) => b - a);
 
-      return interaction.reply({ content: 'Selecione o player:', components: [new ActionRowBuilder().addComponents(playerSelect)], ephemeral: true });
-    }
-
-    if (action === 'zvz_escolher_player') {
-      const targetUserId = interaction.values[0];
-      const confirmation = db.getConfirmation(eventId, targetUserId);
-      if (!confirmation) return interaction.reply({ content: 'Player nao encontrado.', ephemeral: true });
-      const pw1  = db.getWeaponById(confirmation.weapon1_id);
-      const pw2  = db.getWeaponById(confirmation.weapon2_id);
-      const rows = buildWeaponSelect('zvz_atribuir_arma:' + eventId + ':' + targetUserId, weapons, 0, confirmation);
-      return interaction.reply({ content: 'Atribuindo para ' + confirmation.user_name + ' -- Prefs: ' + pw1.name + ' / ' + pw2.name, components: rows, ephemeral: true });
-    }
-
-    if (action === 'zvz_atribuir_arma_prev' || action === 'zvz_atribuir_arma_next') {
-      const targetUserId = extra;
-      const page         = parseInt(extra2) || 0;
-      const confirmation = db.getConfirmation(eventId, targetUserId);
-      const pw1  = db.getWeaponById(confirmation.weapon1_id);
-      const pw2  = db.getWeaponById(confirmation.weapon2_id);
-      return interaction.update({ content: 'Atribuindo para ' + confirmation.user_name + ' -- Prefs: ' + pw1.name + ' / ' + pw2.name, components: buildWeaponSelect('zvz_atribuir_arma:' + eventId + ':' + targetUserId, weapons, page, confirmation) });
-    }
-
-    if (action === 'zvz_atribuir_arma') {
-      const assignUserId = extra;
-      const weaponId     = parseInt(interaction.values[0]);
-      const weapon       = db.getWeaponById(weaponId);
-      const conf         = db.getConfirmation(eventId, assignUserId);
-      db.assignWeapon(eventId, assignUserId, weaponId);
-      sheets.assignPlayerToWeapon(sheetName, weapon.name, conf.user_name).catch(console.error);
-      await interaction.reply({ content: conf.user_name + ' foi atribuido para ' + weapon.name + '.', ephemeral: true });
-      await refreshEmbed(interaction.client, db.getEventById(eventId));
-    }
-
-    if (action === 'zvz_fechar') {
-      if (interaction.user.id !== event.caller_id) {
-        const froleId    = process.env.OFFICER_ROLE_ID;
-        const fIsOfficer = froleId && interaction.member.roles.cache.has(froleId);
-        if (!fIsOfficer) return interaction.reply({ content: 'Apenas o caller ou um officer pode fechar o evento.', ephemeral: true });
+      // Filtra por arma se especificado
+      if (armaFiltro) {
+        sorted = sorted.filter(([id]) => {
+          const nome = itemIdToName(id).toLowerCase();
+          return nome.includes(armaFiltro);
+        });
+        if (!sorted.length) {
+          return interaction.editReply({ content: 'Nenhum kill com arma contendo "' + armaFiltro + '" encontrado para **' + player.name + '**.' });
+        }
       }
-      const confirmations = db.getConfirmationsByEvent(eventId);
-      db.closeEvent(eventId);
-      sheets.clearConfirmations(sheetName, confirmations.length).catch(console.error);
-      stopPolling(eventId);
-      await interaction.reply({ content: 'Evento fechado! Confirmacoes encerradas.', ephemeral: true });
-      await refreshEmbed(interaction.client, db.getEventById(eventId));
+
+      sorted = sorted.slice(0, 10);
+
+      const embed = new EmbedBuilder()
+        .setColor(0xFF4444)
+        .setTitle('Stats — ' + player.name)
+        .setDescription('Armas usadas nos ultimos **' + total + '** kills registrados')
+        .addFields(sorted.map(([itemId, count], i) => ({
+          name: (i + 1) + '. ' + itemIdToName(itemId),
+          value: '`' + count + '` uso(s) — `' + Math.round(count / total * 100) + '%`',
+          inline: true
+        })))
+        .setFooter({ text: 'Fonte: API Albion Online | ultimos 51 kills' });
+
+      return interaction.editReply({ embeds: [embed] });
+
+    } catch (err) {
+      console.error('[Stats] Erro:', err.message);
+      if (err.name === 'AbortError') {
+        return interaction.editReply({ content: 'A API do Albion demorou demais para responder. Tente novamente em instantes.' });
+      }
+      return interaction.editReply({ content: 'Erro: ' + err.message });
     }
   }
 };
