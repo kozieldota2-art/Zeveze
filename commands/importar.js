@@ -60,12 +60,13 @@ module.exports = {
       const auth   = new google.auth.GoogleAuth({ credentials, scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
       const sheets = google.sheets({ version: 'v4', auth });
 
-      // Le cada coluna separadamente:
-      // I = ROLE, J = PT, L = ARMA
+      // Estrutura atual da planilha:
+      // H=# | I=CLASSE | J=ROLE | K=PT | L=Funcao | M=ARMA | N=PLAYER
+      // Le J(ROLE), K(PT) e M(ARMA) separadamente a partir da linha 4
       const [resRole, resPT, resArma] = await Promise.all([
-        sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: sheetName + '!I4:I60' }),
         sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: sheetName + '!J4:J60' }),
-        sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: sheetName + '!L4:L60' }),
+        sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: sheetName + '!K4:K60' }),
+        sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: sheetName + '!M4:M60' }),
       ]);
 
       const roleRows = resRole.data.values || [];
