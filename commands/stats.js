@@ -1,8 +1,9 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const path = require('path');
 
-const ALBION_API = 'https://gameinfo.albiononline.com/api/gameinfo';
-const TIMEOUT_MS = 8000;
+const ALBION_API   = 'https://gameinfo.albiononline.com/api/gameinfo';
+const MURDER_PROXY = 'https://script.google.com/macros/s/AKfycbx6uBeXqwcWa-OFA7qpXGwUuOFLwaCqLnysFNZXuo5Dro7Kz5r17eZSWcD8xmjmxnQs/exec';
+const TIMEOUT_MS   = 10000;
 
 // Traducao embutida
 const translation = {"Hallowfall":"Queda Santa","Blight Staff":"Pustulento","Holy Staff":"Cajado Sagrado","Dagger Pair":"Par de Adagas","Rampant Staff":"Rampante","Mace":"Maça 1H","Redemption Staff":"Redenção","Incubus Mace":"Íncubo","Hand of Justice":"Mão da Justiça","Nature Staff":"Cajado da Natureza","Hammer":"Martelo 1H","Longbow":"Arco Longo","Druidic Staff":"Cajado Druídico","Polehammer":"Martelo de Batalha","Occult Staff":"Oculto","Staff of Balance":"Cajado do Equilíbrio","Bedrock Mace":"Maça Pétrea","Great Arcane Staff":"Arcano Elevado","Bloodletter":"Dessangradora","Exalted Staff":"Exaltado","Oathkeepers":"Jurador","Dreadstorm Monarch":"Monarca Tempestuoso","Astral Staff":"Astral","Lifecurse Staff":"Execrado","Grovekeeper":"Guarda Bosque","Dagger":"Adaga","Witchwork Staff":"Feiticeiro","Malevolent Locus":"Locus","Arcane Staff":"Arcano Silence","Great Holy Staff":"Sagrado Elevado","Divine Staff":"Cajado Divino","Permafrost Prism":"Prisma","Frost Staff":"Cajado de Gelo","Deathgivers":"Mortíficos","Claws":"Garras","Black Monk Stave":"Monge Negro","Realmbreaker":"Quebra reino","Dawnsong":"Canção da Alvorada","Shadowcaller":"Chama-sombra","Bear Paws":"Patas de Urso","Spirithunter":"Caça espíritos","Carrioncaller":"Chama corpos","Tombhammer":"Martelo Tumular","Mistpiercer":"Furabruma","Bow of Badon":"Badon","Siegebow":"Arco de Cerco","Weeping Repeater":"Repetidor Lamentoso","Boltcasters":"Lançadores de Dardos","Galatines":"Galatinas","Kingmaker":"Cria-reis","Vendetta's Wrath":"Cajado de Fogo Virulento","Infernal Scythe":"Segadeira","Ghostfang":"Presa Demoníaca","Hellion Hands":"Mãos Pretas","Broadsword":"Espada Larga","Claymore":"Montante","Dual Swords":"Espadas Duplas","Carving Sword":"Espada Entalhada","Battle Axe":"Machado de Guerra","Great Axe":"Machadão","Halberd":"Alabarda","Spear":"Lança","Pike":"Pique","Glaive":"Archa","Crystal Reaper":"Archa Fraturada","Heron Spear":"Garceira","Trinity Spear":"Lança Trina","Warhammer":"Martelo de Guerra","Great Hammer":"Martelo Pesado","Forge Hammers":"Martelos de Forja","Crossbow":"Besta","Heavy Crossbow":"Besta Pesada","Light Crossbow":"Besta Leve","Bow":"Arco","Warbow":"Arco de Guerra","Wailing Bow":"Plangente","Whispering Bow":"Arco Sussurrante","Shortsword":"Espada Curta","Sword":"Espada","Rapier":"Rapieira","Cursed Staff":"Cajado Amaldiçoado","Great Cursed Staff":"Cajado Amaldiçoado Elevado","Fire Staff":"Cajado de Fogo","Great Fire Staff":"Cajado de Fogo Elevado","Blazing Staff":"Cajado Fulgurante","Wildfire Staff":"Cajado do Fogo Selvagem","Brimstone Staff":"Cajado Sulfuroso","Great Frost Staff":"Cajado de Gelo Elevado","Glacial Staff":"Cajado Glacial","Hoarfrost Staff":"Cajado Gélido","Great Nature Staff":"Cajado da Natureza Elevado","Ironroot Staff":"Cajado Férreo","Enigmatic Staff":"Cajado Enigmático","Demonic Staff":"Cajado Demoníaco","Reaper":"Segadeira","Double Bladed Staff":"Cajado de Dupla Lâmina","Primal Staff":"Cajado Primordial","Mistcaller":"Chamador de Névoa","Spiked Gauntlets":"Manoplas Cravadas","Brawlers":"Braçadeiras","Morning Star":"Estrela da Manhã","Scimitar":"Lâmina Aclarada","Katar":"Fúria Contida","Sickle Pair":"Gêmeas Aniquiladoras"};
@@ -29,6 +30,16 @@ async function fetchWithTimeout(url, ms) {
     clearTimeout(timer);
     throw e;
   }
+}
+
+// Busca stats diretamente no Murder Ledger via Google Apps Script proxy
+async function fetchMurderLedger(playerName) {
+  const url = MURDER_PROXY + '?player=' + encodeURIComponent(playerName) + '&days=9999';
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) throw new Error('Proxy HTTP ' + res.status);
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data.weapons || [];
 }
 
 async function getPlayerId(playerName) {
@@ -189,45 +200,66 @@ module.exports = {
     const armaFiltro = interaction.options.getString('arma')?.toLowerCase() || null;
 
     try {
-      const player = await getPlayerId(playerName);
-      const { weaponCount, total } = await getWeaponUsage(player.id);
+      // Tenta Murder Ledger via proxy primeiro (mais completo)
+      let weapons = [];
+      let fonte = 'Murder Ledger';
 
-      if (!Object.keys(weaponCount).length) {
-        return interaction.editReply({ content: 'Nenhum kill encontrado para **' + player.name + '**.' });
+      try {
+        weapons = await fetchMurderLedger(playerName);
+      } catch(mlErr) {
+        console.log('[Stats] Murder Ledger falhou: ' + mlErr.message + ' — tentando API Albion...');
+        fonte = 'API Albion Online (ultimos 51 kills)';
+        const player = await getPlayerId(playerName);
+        const { weaponCount, total: t } = await getWeaponUsage(player.id);
+
+        weapons = Object.entries(weaponCount)
+          .sort(([,a],[,b]) => b - a)
+          .map(([id, count]) => ({
+            weapon_name: itemIdToName(id),
+            usages: count,
+            win_rate: null
+          }));
       }
 
-      let sorted = Object.entries(weaponCount).sort(([,a],[,b]) => b - a);
+      if (!weapons.length) {
+        return interaction.editReply({ content: 'Nenhum dado encontrado para **' + playerName + '**.' });
+      }
 
       // Filtra por arma se especificado
       if (armaFiltro) {
-        sorted = sorted.filter(([id]) => {
-          const nome = itemIdToName(id).toLowerCase();
-          return nome.includes(armaFiltro);
-        });
-        if (!sorted.length) {
-          return interaction.editReply({ content: 'Nenhum kill com arma contendo "' + armaFiltro + '" encontrado para **' + player.name + '**.' });
+        weapons = weapons.filter(w =>
+          (w.weapon_name || '').toLowerCase().includes(armaFiltro)
+        );
+        if (!weapons.length) {
+          return interaction.editReply({ content: 'Nenhuma arma com "' + armaFiltro + '" encontrada para **' + playerName + '**.' });
         }
       }
 
-      sorted = sorted.slice(0, 10);
+      const top = weapons.slice(0, 10);
+      const totalUsos = top.reduce((s, w) => s + (w.usages || 0), 0);
 
       const embed = new EmbedBuilder()
         .setColor(0xFF4444)
-        .setTitle('Stats — ' + player.name)
-        .setDescription('Armas usadas nos ultimos **' + total + '** kills registrados')
-        .addFields(sorted.map(([itemId, count], i) => ({
-          name: (i + 1) + '. ' + itemIdToName(itemId),
-          value: '`' + count + '` uso(s) — `' + Math.round(count / total * 100) + '%`',
-          inline: true
-        })))
-        .setFooter({ text: 'Fonte: API Albion Online | ultimos 51 kills' });
+        .setTitle('Stats — ' + playerName)
+        .addFields(top.map((w, i) => {
+          const nome    = w.weapon_name || '?';
+          const usos    = w.usages || 0;
+          const assists = w.assists != null ? ' | Assists: `' + w.assists + '`' : '';
+          const wr      = w.win_rate != null ? ' | Win: `' + (w.win_rate * 100).toFixed(0) + '%`' : '';
+          return {
+            name: (i + 1) + '. ' + nome,
+            value: 'Usos: `' + usos + '`' + assists + wr,
+            inline: true
+          };
+        }))
+        .setFooter({ text: 'Fonte: ' + fonte });
 
       return interaction.editReply({ embeds: [embed] });
 
     } catch (err) {
       console.error('[Stats] Erro:', err.message);
       if (err.name === 'AbortError') {
-        return interaction.editReply({ content: 'A API do Albion demorou demais para responder. Tente novamente em instantes.' });
+        return interaction.editReply({ content: 'Timeout — tente novamente.' });
       }
       return interaction.editReply({ content: 'Erro: ' + err.message });
     }
