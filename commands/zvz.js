@@ -76,15 +76,15 @@ async function pollEvent(client, eventId) {
 
     const res = await sheetsApi.spreadsheets.values.get({
       spreadsheetId: process.env.SPREADSHEET_ID,
-      range: sheetName + '!L4:M60'
+      range: sheetName + '!M4:N60'
     });
 
     const rows = res.data.values || [];
     let updated = false;
 
     for (const row of rows) {
-      const armaName   = (row[0] || '').trim();  // coluna L = ARMA
-      const playerName = (row[1] || '').trim();  // coluna M = PLAYER
+      const armaName   = (row[0] || '').trim();  // coluna M = ARMA
+      const playerName = (row[1] || '').trim();  // coluna N = PLAYER
       if (!armaName || !playerName) continue;
 
       const weapon = weapons.find(w => w.name.toLowerCase() === armaName.toLowerCase());
