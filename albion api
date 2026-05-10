@@ -1,0 +1,95 @@
+const db = require('./database');
+
+const ALBION_API  = 'https://gameinfo.albiononline.com/api/gameinfo';
+const TIMEOUT_MS  = 10000;
+const CACHE_HOURS = 24;
+
+// Traducao embutida (codigos internos -> nome PT)
+const WEAPON_MAP = {"MAIN_HOLYSTAFF_AVALON":"Queda Santa","2H_NATURESTAFF_HELL":"Pustulento","MAIN_HOLYSTAFF":"Cajado Sagrado","2H_DAGGERPAIR":"Par de Adagas","2H_NATURESTAFF_KEEPER":"Rampante","MAIN_MACE":"Maça 1H","2H_HOLYSTAFF_UNDEAD":"Redenção","MAIN_MACE_HELL":"Íncubo","2H_HAMMER_AVALON":"Mão da Justiça","MAIN_NATURESTAFF":"Cajado da Natureza","MAIN_HAMMER":"Martelo 1H","2H_LONGBOW":"Arco Longo","MAIN_NATURESTAFF_KEEPER":"Cajado Druídico","2H_POLEHAMMER":"Martelo de Batalha","2H_ARCANESTAFF_HELL":"Oculto","2H_ROCKSTAFF_KEEPER":"Cajado do Equilíbrio","MAIN_ROCKMACE_KEEPER":"Maça Pétrea","2H_ARCANESTAFF":"Arcano Elevado","MAIN_RAPIER_MORGANA":"Dessangradora","2H_HOLYSTAFF_CRYSTAL":"Exaltado","2H_DUALMACE_AVALON":"Jurador","MAIN_MACE_CRYSTAL":"Monarca Tempestuoso","2H_ARCANESTAFF_CRYSTAL":"Astral","MAIN_CURSEDSTAFF_UNDEAD":"Execrado","2H_RAM_KEEPER":"Guarda Bosque","MAIN_DAGGER":"Adaga","MAIN_ARCANESTAFF_UNDEAD":"Feiticeiro","2H_ENIGMATICORB_MORGANA":"Locus","MAIN_ARCANESTAFF":"Arcano Silence","2H_HOLYSTAFF":"Sagrado Elevado","2H_DIVINESTAFF":"Cajado Divino","2H_ICECRYSTAL_UNDEAD":"Prisma","MAIN_FROSTSTAFF":"Cajado de Gelo","2H_DUALSICKLE_UNDEAD":"Mortíficos","2H_CLAWPAIR":"Garras","2H_COMBATSTAFF_MORGANA":"Monge Negro","2H_AXE_AVALON":"Quebra reino","2H_FIRE_RINGPAIR_AVALON":"Canção da Alvorada","MAIN_CURSEDSTAFF_AVALON":"Chama-sombra","2H_KNUCKLES_KEEPER":"Patas de Urso","2H_SPEAR_UNDEAD":"Caça espíritos","2H_HALBERD_MORGANA":"Chama corpos","2H_HAMMER_UNDEAD":"Martelo Tumular","2H_CROSSBOW_UNDEAD":"Furabruma","2H_BOW_KEEPER":"Badon","2H_CROSSBOWLARGE":"Arco de Cerco","2H_REPEATINGCROSSBOW_UNDEAD":"Repetidor Lamentoso","2H_CROSSBOW_AVALON":"Lançadores de Dardos","2H_CLAYMORE_AVALON":"Cria-reis","MAIN_SPEAR":"Lança","2H_SPEAR":"Pique","2H_GLAIVE":"Archa","MAIN_AXE":"Machado de Guerra","2H_AXE":"Machadão","2H_HALBERD":"Alabarda","MAIN_SWORD":"Espada","2H_CLAYMORE":"Montante","2H_DUALSWORD":"Espadas Duplas","MAIN_BOW":"Arco","2H_BOW":"Arco de Guerra","2H_BOW_UNDEAD":"Plangente","MAIN_BOW_KEEPER":"Arco Sussurrante","MAIN_CROSSBOW":"Besta","2H_CROSSBOW":"Besta Pesada","MAIN_CURSEDSTAFF":"Cajado Amaldiçoado","2H_CURSEDSTAFF":"Cajado Amaldiçoado Elevado","MAIN_FIRESTAFF":"Cajado de Fogo","2H_FIRESTAFF":"Cajado de Fogo Elevado","2H_INFERNOSTAFF_MORGANA":"Cajado Fulgurante","MAIN_FROSTSTAFF":"Cajado de Gelo","2H_FROSTSTAFF":"Cajado de Gelo Elevado","2H_ENIGMATICSTAFF":"Cajado Enigmático","2H_DEMONICSTAFF":"Cajado Demoníaco","2H_NATURESTAFF":"Cajado da Natureza Elevado","2H_IRONROOTSTAFF_KEEPER":"Cajado Férreo","2H_PRIMALSTAFF":"Cajado Primordial"};
+
+function itemIdToName(itemId) {
+  const clean = itemId.replace(/^T\d+_/, '').replace(/@\d+$/, '');
+  return WEAPON_MAP[clean] || clean;
+}
+
+async function fetchWithTimeout(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+    return res;
+  } catch(e) {
+    clearTimeout(timer);
+    throw e;
+  }
+}
+
+// Busca e salva stats de um player em background (nao bloqueia)
+async function fetchAndCacheStats(userId, userName, albionName) {
+  try {
+    // Se cache ainda valido, nao busca de novo
+    if (!db.isStatsStale(userId, CACHE_HOURS)) return;
+
+    // Busca ID do player na API
+    const searchRes = await fetchWithTimeout(ALBION_API + '/search?q=' + encodeURIComponent(albionName));
+    if (!searchRes.ok) return;
+    const searchData = await searchRes.json();
+    const players = searchData.players || [];
+    const player = players.find(p => p.Name.toLowerCase() === albionName.toLowerCase()) || players[0];
+    if (!player) return;
+
+    // Busca kills recentes
+    const killsRes = await fetchWithTimeout(ALBION_API + '/players/' + player.Id + '/kills?limit=51&offset=0');
+    if (!killsRes.ok) return;
+    const kills = await killsRes.json();
+
+    // Conta uso de armas
+    const weaponCount = {};
+    for (const kill of kills) {
+      const tipo = kill?.Killer?.Equipment?.MainHand?.Type || '';
+      if (!tipo) continue;
+      weaponCount[tipo] = (weaponCount[tipo] || 0) + 1;
+    }
+
+    // Monta lista ordenada
+    const stats = Object.entries(weaponCount)
+      .sort(([,a],[,b]) => b - a)
+      .slice(0, 10)
+      .map(([id, count]) => ({
+        id,
+        name: itemIdToName(id),
+        count,
+        pct: Math.round(count / kills.length * 100)
+      }));
+
+    db.upsertPlayerStats(userId, userName, player.Id, stats);
+    console.log('[Cache] Stats salvos para ' + userName + ' (' + stats.length + ' armas)');
+
+  } catch(err) {
+    console.log('[Cache] Erro ao buscar stats de ' + userName + ':', err.message);
+  }
+}
+
+// Formata stats para exibir no Discord
+function formatStats(userId, weaponName) {
+  const cached = db.getPlayerStats(userId);
+  if (!cached || !cached.stats?.length) return null;
+
+  const stats = cached.stats;
+  const total = stats.reduce((s, w) => s + w.count, 0);
+
+  // Se filtrar por arma especifica
+  if (weaponName) {
+    const match = stats.find(w => w.name.toLowerCase().includes(weaponName.toLowerCase()));
+    if (match) {
+      return match.pct + '% dos kills (' + match.count + '/' + total + ')';
+    }
+    return '0% (sem registro)';
+  }
+
+  // Top 3 armas
+  return stats.slice(0, 3).map(w => w.name + ' ' + w.pct + '%').join(' | ');
+}
+
+module.exports = { fetchAndCacheStats, formatStats, itemIdToName };
