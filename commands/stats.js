@@ -1,30 +1,19 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
-const REGIONS = [
-  'https://murderledger.albiononline2d.com',
-  'https://murderledger-europe.albiononline2d.com',
-  'https://murderledger-asia.albiononline2d.com',
-];
+const BASE_URL = 'https://murderledger.albiononline2d.com';
 
 async function fetchWeapons(playerName, lookbackDays = 9999) {
-  for (const base of REGIONS) {
-    try {
-      const url = base + '/api/players/' + encodeURIComponent(playerName) + '/weapons?lookback_days=' + lookbackDays;
-      const res = await fetch(url, {
-        headers: {
-          'Accept': 'application/json',
-          'User-Agent': 'ZVZ-Bot/1.0'
-        }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        return { data, region: base };
-      }
-    } catch (e) {
-      continue;
+  const url = BASE_URL + '/api/players/' + encodeURIComponent(playerName) + '/weapons?lookback_days=' + lookbackDays;
+  const res = await fetch(url, {
+    headers: {
+      'Accept':          'application/json',
+      'Referer':         BASE_URL + '/',
+      'Origin':          BASE_URL,
+      'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
     }
-  }
-  return null;
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
 }
 
 module.exports = {
@@ -48,65 +37,52 @@ module.exports = {
     const playerName = interaction.options.getString('player');
     const armaFiltro = interaction.options.getString('arma')?.toLowerCase() || null;
 
-    const result = await fetchWeapons(playerName);
+    try {
+      const data = await fetchWeapons(playerName);
+      let weapons = data.weapons || [];
 
-    if (!result) {
-      return interaction.editReply({
-        content: 'Nao consegui acessar o Murder Ledger. Pode ser que o player nao exista ou o site esteja fora.'
-      });
-    }
+      if (!weapons.length) {
+        return interaction.editReply({ content: 'Player **' + playerName + '** nao encontrado no Murder Ledger.' });
+      }
 
-    const { data, region } = result;
+      // Filtra por arma se especificado
+      if (armaFiltro) {
+        weapons = weapons.filter(w =>
+          (w.weapon_name || '').toLowerCase().includes(armaFiltro) ||
+          (w.weapon     || '').toLowerCase().includes(armaFiltro)
+        );
+      }
 
-    // Loga no console pra debugar a estrutura
-    console.log('[Stats] Resposta do Murder Ledger para ' + playerName + ':');
-    console.log(JSON.stringify(data).substring(0, 500));
+      if (!weapons.length) {
+        return interaction.editReply({ content: 'Nenhuma arma encontrada com "' + armaFiltro + '" para o player **' + playerName + '**.' });
+      }
 
-    // Tenta montar o embed com os dados
-    let weapons = [];
+      const embed = new EmbedBuilder()
+        .setColor(0xFF4444)
+        .setTitle('Murder Ledger — ' + playerName)
+        .setURL(BASE_URL + '/players/' + encodeURIComponent(playerName) + '/weapons?lookback_days=9999')
+        .setFooter({ text: 'Fonte: murderledger.albiononline2d.com | Todos os tempos' });
 
-    if (Array.isArray(data)) {
-      weapons = data;
-    } else if (data.weapons) {
-      weapons = data.weapons;
-    } else if (data.data) {
-      weapons = data.data;
-    }
-
-    if (!weapons.length) {
-      return interaction.editReply({
-        content: 'Player encontrado mas sem dados de arma. Estrutura retornada:\n```json\n' + JSON.stringify(data).substring(0, 500) + '\n```'
-      });
-    }
-
-    // Filtra por arma se especificado
-    if (armaFiltro) {
-      weapons = weapons.filter(w => {
-        const nome = (w.weapon || w.name || w.weapon_name || '').toLowerCase();
-        return nome.includes(armaFiltro);
-      });
-    }
-
-    const embed = new EmbedBuilder()
-      .setColor(0x5865F2)
-      .setTitle('Stats de ' + playerName + ' no Murder Ledger')
-      .setFooter({ text: 'Fonte: ' + region });
-
-    const topWeapons = weapons.slice(0, 10);
-
-    if (topWeapons.length === 0) {
-      embed.setDescription('Nenhuma arma encontrada com esse filtro.');
-    } else {
+      const topWeapons = weapons.slice(0, 10);
       const lines = topWeapons.map((w, i) => {
-        const nome  = w.weapon || w.name || w.weapon_name || JSON.stringify(w).substring(0, 50);
-        const usos  = w.total || w.count || w.uses || w.kills || '?';
-        const wins  = w.wins || w.kills || '?';
-        return (i + 1) + '. **' + nome + '** — ' + usos + ' usos';
+        const nome    = w.weapon_name || w.weapon || 'Desconhecida';
+        const usos    = w.usages      || 0;
+        const assists = w.assists     || 0;
+        const kills   = w.kills       || 0;
+        const winRate = w.win_rate != null ? (w.win_rate * 100).toFixed(1) + '%' : '?';
+        const ip      = w.average_item_power ? Math.round(w.average_item_power) : '?';
+
+        return (i + 1) + '. **' + nome + '**\n' +
+               '   Usos: `' + usos + '` | Assists: `' + assists + '` | Kills: `' + kills + '` | Win: `' + winRate + '` | IP: `' + ip + '`';
       }).join('\n');
 
       embed.setDescription(lines);
-    }
 
-    return interaction.editReply({ embeds: [embed] });
+      return interaction.editReply({ embeds: [embed] });
+
+    } catch (err) {
+      console.error('[Stats] Erro:', err.message);
+      return interaction.editReply({ content: 'Erro ao buscar dados: ' + err.message });
+    }
   }
 };
