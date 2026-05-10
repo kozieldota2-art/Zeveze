@@ -26,15 +26,15 @@ async function addConfirmation(sheetName, number, playerName, weapon1, weapon2) 
   const sheets = google.sheets({ version: 'v4', auth });
 
   const row      = 3 + number;
-  const statsUrl = 'https://kozieldota2-art.github.io/Zeveze/?player=' + encodeURIComponent(playerName);
+  const statsUrl = 'https://kozieldota2-art.github.io/Zeveze/?player=' + playerName;
 
-  // B=#, C=Players, D=Arma1, E=Arma2, F=USAGES (link)
+  // C=Players, D=Arma1, E=Arma2, F=USAGES (link)
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: sheetName + '!B' + row + ':F' + row,
+    range: sheetName + '!C' + row + ':F' + row,
     valueInputOption: 'USER_ENTERED',
     requestBody: {
-      values: [[number, playerName, weapon1, weapon2, '=HYPERLINK("' + statsUrl + '","Ver Stats")']]
+      values: [[playerName, weapon1, weapon2, statsUrl]]
     }
   });
 }
@@ -48,10 +48,10 @@ async function removeConfirmation(sheetName, number) {
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: sheetName + '!B' + row + ':F' + row,
+    range: sheetName + '!C' + row + ':F' + row,
     valueInputOption: 'RAW',
     requestBody: {
-      values: [['', '', '', '', '']]
+      values: [['', '', '', '']]
     }
   });
 }
@@ -103,14 +103,14 @@ async function clearConfirmations(sheetName, total) {
 
   const rows = [];
   for (let i = 0; i < total; i++) {
-    rows.push(['', '', '', '', '']);
+    rows.push(['', '', '', '']);
   }
 
   if (rows.length === 0) return;
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: sheetName + '!B4:F' + (3 + total),
+    range: sheetName + '!C4:F' + (3 + total),
     valueInputOption: 'RAW',
     requestBody: { values: rows }
   });
@@ -121,12 +121,12 @@ async function addConfirmationSimples(sheetName, number, playerName) {
   const auth     = getAuth();
   const sheets   = google.sheets({ version: 'v4', auth });
   const row      = 3 + number;
-  const statsUrl = 'https://kozieldota2-art.github.io/Zeveze/?player=' + encodeURIComponent(playerName);
+  const statsUrl = 'https://kozieldota2-art.github.io/Zeveze/?player=' + playerName;
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: sheetName + '!B' + row + ':E' + row,
+    range: sheetName + '!C' + row + ':F' + row,
     valueInputOption: 'USER_ENTERED',
-    requestBody: { values: [[number, playerName, '', '=HYPERLINK("' + statsUrl + '","Ver Stats")']] }
+    requestBody: { values: [[playerName, '', '', statsUrl]] }
   });
 }
 
