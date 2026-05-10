@@ -3,7 +3,7 @@ const path = require('path');
 
 const MURDER_API = 'https://murderledger.com/api';
 const ALBION_API  = 'https://gameinfo.albiononline.com/api/gameinfo';
-const TIMEOUT_MS  = 10000;
+const TIMEOUT_MS  = 25000;
 const KILL_LIMIT  = 300;
 
 // Traducao embutida
@@ -217,24 +217,11 @@ module.exports = {
 
     try {
       let weapons = [];
-      let fonte = 'Murder Ledger';
+      const fonte = 'Murder Ledger | Todos os tempos';
 
-      try {
-        weapons = await fetchMurderLedger(playerName);
-        if (!weapons.length) throw new Error('sem dados');
-      } catch(mlErr) {
-        console.log('[Stats] Murder Ledger falhou: ' + mlErr.message + ' — usando API Albion...');
-        fonte = 'API Albion (ultimos ' + KILL_LIMIT + ' kills)';
-        const player = await getPlayerId(playerName);
-        const { weaponCount } = await getWeaponUsage(player.id);
-        weapons = Object.entries(weaponCount)
-          .sort(([,a],[,b]) => b - a)
-          .map(([id, count]) => ({
-            weapon_name: itemIdToName(id),
-            usages: count,
-            assists: null,
-            win_rate: null
-          }));
+      weapons = await fetchMurderLedger(playerName);
+      if (!weapons.length) {
+        return interaction.editReply({ content: 'Player **' + playerName + '** nao encontrado no Murder Ledger.' });
       }
 
       if (!weapons.length) {
