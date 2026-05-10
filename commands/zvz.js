@@ -7,8 +7,9 @@ const {
   StringSelectMenuBuilder
 } = require('discord.js');
 const { google } = require('googleapis');
-const db     = require('../database');
-const sheets = require('../sheets');
+const db         = require('../database');
+const sheets     = require('../sheets');
+const albionApi  = require('../albion_api');
 
 const ROLE_LABEL = {
   'Tank Ofensivo':  '[Tank Of]',
@@ -91,10 +92,12 @@ async function pollEvent(client, eventId) {
 
       const confirmations = db.getConfirmationsByEvent(eventId);
       const conf = confirmations.find(c =>
-        c.user_name.toLowerCase() === playerName.toLowerCase() &&
-        (!c.assigned_weapon_id || c.assigned_weapon_id !== weapon.id)
+        c.user_name.toLowerCase() === playerName.toLowerCase()
       );
       if (!conf) continue;
+
+      // Só atribui se ainda não foi atribuído para esta arma
+      if (conf.assigned_weapon_id === weapon.id) continue;
 
       db.assignWeapon(eventId, conf.user_id, weapon.id);
       updated = true;
@@ -423,6 +426,9 @@ module.exports = {
       const confirmations = db.getConfirmationsByEvent(eventId);
       const number = confirmations.findIndex(c => c.user_id === interaction.user.id) + 1;
       sheets.addConfirmation(sheetName, number, interaction.member.displayName, w1.name, w2.name).catch(console.error);
+
+      // Busca stats do player em background (nao bloqueia)
+      albionApi.fetchAndCacheStats(interaction.user.id, interaction.member.displayName, interaction.member.displayName).catch(() => {});
 
       await interaction.reply({ content: 'Presenca confirmada! Preferencias: ' + w1.name + ' / ' + w2.name + '. Aguarde o caller te atribuir uma arma.', ephemeral: true });
       await refreshEmbed(interaction.client, db.getEventById(eventId));
