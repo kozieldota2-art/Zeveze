@@ -34,7 +34,7 @@ async function addConfirmation(sheetName, number, playerName, weapon1, weapon2) 
     range: sheetName + '!C' + row + ':F' + row,
     valueInputOption: 'USER_ENTERED',
     requestBody: {
-      values: [[ playerName, weapon1, weapon2, '=HIPERLINK("' + statsUrl + '","Ver Stats")' ]]
+      values: [[ playerName, weapon1, weapon2, '=HIPERLINK("' + statsUrl + '";"Ver Stats")' ]]
     }
   });
 }
@@ -126,7 +126,7 @@ async function addConfirmationSimples(sheetName, number, playerName) {
     spreadsheetId: SPREADSHEET_ID,
     range: sheetName + '!C' + row + ':F' + row,
     valueInputOption: 'USER_ENTERED',
-    requestBody: { values: [[playerName, '', '', '=HIPERLINK("' + statsUrl + '","Ver Stats")']] }
+    requestBody: { values: [[playerName, '', '', '=HIPERLINK("' + statsUrl + '";"Ver Stats")']] }
   });
 }
 
