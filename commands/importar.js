@@ -1,139 +1,130 @@
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { google } = require('googleapis');
+const db = require('../database');
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 
-function getAuth() {
-  const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
-  return new google.auth.GoogleAuth({
-    credentials,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets']
-  });
+const SHEET_MAP = {
+  'kite':        'COMP KITE',
+  'brawl':       'COMP BRAWL',
+  'magrin push': 'COMP MAGRIN PUSH',
+  'yami':        'COMP YAMI',
+  'no lock':     'COMP NO LOCK',
+  'magr1n':      'COMP MAGR1N',
+};
+
+function mapRole(roleStr) {
+  if (!roleStr) return 'DPS Melee';
+  const r = roleStr.toUpperCase().trim();
+  if (r === 'TANK')    return 'Tank Ofensivo';
+  if (r === 'SUPORTE') return 'Support';
+  if (r === 'DPS')     return 'DPS Melee';
+  if (r === 'HEALER')  return 'Healer';
+  if (r === 'BM')      return 'Battlemount';
+  return 'DPS Melee';
 }
 
-// Acha a proxima linha vazia na coluna de players (coluna C = index 2)
-async function getNextEmptyRow(sheets, sheetName) {
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: sheetName + '!C4:C100'
-  });
-  const rows = res.data.values || [];
-  return 4 + rows.length; // começa na linha 4
-}
-
-// Adiciona confirmacao de presenca na planilha (lado esquerdo)
-async function addConfirmation(sheetName, number, playerName, weapon1, weapon2) {
-  const auth   = getAuth();
-  const sheets = google.sheets({ version: 'v4', auth });
-
-  const row      = 3 + number;
-  const statsUrl = 'https://kozieldota2-art.github.io/Zeveze/?player=' + playerName;
-
-  // C=Players, D=Arma1, E=Arma2, F=USAGES (link)
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: sheetName + '!C' + row + ':F' + row,
-    valueInputOption: 'USER_ENTERED',
-    requestBody: {
-      values: [[playerName, weapon1, weapon2, statsUrl]]
-    }
-  });
-}
-
-// Remove confirmacao da planilha
-async function removeConfirmation(sheetName, number) {
-  const auth   = getAuth();
-  const sheets = google.sheets({ version: 'v4', auth });
-
-  const row = 3 + number;
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: sheetName + '!C' + row + ':F' + row,
-    valueInputOption: 'RAW',
-    requestBody: {
-      values: [['', '', '', '']]
-    }
-  });
-}
-
-// Atribui player a uma arma no lado direito da planilha
-async function assignPlayerToWeapon(sheetName, weaponName, playerName) {
-  const auth   = getAuth();
-  const sheets = google.sheets({ version: 'v4', auth });
-
-  // Le coluna M (ARMA) para achar a linha
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: sheetName + '!M4:M60'
-  });
-
-  const rows = res.data.values || [];
-  let targetRow = null;
-
-  for (let i = 0; i < rows.length; i++) {
-    const cell = (rows[i][0] || '').toLowerCase().trim();
-    if (cell === weaponName.toLowerCase().trim()) {
-      targetRow = 4 + i;
-      break;
-    }
-  }
-
-  if (!targetRow) {
-    console.log('Arma nao encontrada na planilha: ' + weaponName);
-    return false;
-  }
-
-  // Coluna N = player
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: sheetName + '!N' + targetRow,
-    valueInputOption: 'RAW',
-    requestBody: {
-      values: [[playerName]]
-    }
-  });
-
-  return true;
-}
-
-// Limpa confirmacoes da planilha (ao fechar evento)
-async function clearConfirmations(sheetName, total) {
-  const auth   = getAuth();
-  const sheets = google.sheets({ version: 'v4', auth });
-
-  const rows = [];
-  for (let i = 0; i < total; i++) {
-    rows.push(['', '', '', '']);
-  }
-
-  if (rows.length === 0) return;
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: sheetName + '!C4:F' + (3 + total),
-    valueInputOption: 'RAW',
-    requestBody: { values: rows }
-  });
-}
-
-// Adiciona confirmacao simples (taaanque) - so nome na coluna C
-async function addConfirmationSimples(sheetName, number, playerName) {
-  const auth     = getAuth();
-  const sheets   = google.sheets({ version: 'v4', auth });
-  const row      = 3 + number;
-  const statsUrl = 'https://kozieldota2-art.github.io/Zeveze/?player=' + playerName;
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: sheetName + '!C' + row + ':F' + row,
-    valueInputOption: 'USER_ENTERED',
-    requestBody: { values: [[playerName, '', '', statsUrl]] }
-  });
+function isOfficer(interaction) {
+  const roleId = process.env.OFFICER_ROLE_ID;
+  if (!roleId) return true;
+  return interaction.member.roles.cache.has(roleId);
 }
 
 module.exports = {
-  addConfirmation,
-  addConfirmationSimples,
-  removeConfirmation,
-  assignPlayerToWeapon,
-  clearConfirmations
+  data: new SlashCommandBuilder()
+    .setName('importar')
+    .setDescription('Importa armas de uma comp diretamente da planilha')
+    .addStringOption(opt => opt
+      .setName('comp')
+      .setDescription('Nome da comp no bot')
+      .setRequired(true)
+      .setAutocomplete(true)
+    ),
+
+  async execute(interaction) {
+    if (!isOfficer(interaction)) {
+      return interaction.reply({ content: 'Voce precisa ser Officer para usar este comando.', ephemeral: true });
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+
+    const compName = interaction.options.getString('comp');
+    const comp     = db.getCompByName(compName);
+    if (!comp) return interaction.editReply({ content: 'Composicao "' + compName + '" nao encontrada.' });
+
+    const sheetName = SHEET_MAP[compName.toLowerCase()];
+    if (!sheetName) return interaction.editReply({ content: 'Aba nao mapeada para "' + compName + '".' });
+
+    try {
+      const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+      const auth   = new google.auth.GoogleAuth({ credentials, scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
+      const sheets = google.sheets({ version: 'v4', auth });
+
+      // Estrutura atual da planilha:
+      // H=# | I=CLASSE | J=ROLE | K=PT | L=Funcao | M=ARMA | N=PLAYER
+      // Le J(ROLE), K(PT) e M(ARMA) separadamente a partir da linha 4
+      const [resRole, resPT, resArma] = await Promise.all([
+        sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: sheetName + '!J4:J60' }),
+        sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: sheetName + '!K4:K60' }),
+        sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: sheetName + '!M4:M60' }),
+      ]);
+
+      const roleRows = resRole.data.values || [];
+      const ptRows   = resPT.data.values   || [];
+      const armaRows = resArma.data.values || [];
+
+      const maxLen = Math.max(roleRows.length, ptRows.length, armaRows.length);
+      if (!maxLen) return interaction.editReply({ content: 'Nao encontrei dados na aba ' + sheetName + '.' });
+
+      let importadas = 0;
+      let ignoradas  = 0;
+      const importadasList = [];
+
+      for (let i = 0; i < maxLen; i++) {
+        const roleStr = ((roleRows[i] || [])[0] || '').trim();
+        const ptStr   = ((ptRows[i]   || [])[0] || '1').trim();
+        const arma    = ((armaRows[i] || [])[0] || '').trim();
+
+        if (!arma) { ignoradas++; continue; }
+
+        const role = mapRole(roleStr);
+        const pt   = ptStr === '2' ? 2 : 1;
+
+        try {
+          db.addWeapon(comp.id, arma, role, '', pt);
+          importadasList.push('[PT' + pt + '] ' + role + ': ' + arma);
+          importadas++;
+        } catch (e) {
+          ignoradas++;
+        }
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor(0x00FF88)
+        .setTitle('Importacao concluida!')
+        .addFields(
+          { name: 'Composicao', value: comp.name,         inline: true },
+          { name: 'Aba',        value: sheetName,          inline: true },
+          { name: 'Importadas', value: String(importadas), inline: true },
+          { name: 'Ignoradas',  value: String(ignoradas),  inline: true },
+          { name: 'Armas importadas', value: importadasList.slice(0, 20).join('\n') || 'Nenhuma', inline: false }
+        )
+        .setFooter({ text: 'Use /arma listar para conferir.' });
+
+      return interaction.editReply({ embeds: [embed] });
+
+    } catch (err) {
+      console.error('Erro ao importar:', err.message);
+      return interaction.editReply({ content: 'Erro ao acessar a planilha: ' + err.message });
+    }
+  },
+
+  async autocomplete(interaction) {
+    const value = interaction.options.getFocused().toLowerCase();
+    const comps = db.getAllComps()
+      .filter(c => c.name.toLowerCase().includes(value))
+      .slice(0, 25)
+      .map(c => ({ name: c.name, value: c.name }));
+    await interaction.respond(comps);
+  }
 };
