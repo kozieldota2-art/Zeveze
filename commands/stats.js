@@ -1,9 +1,10 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const path = require('path');
 
-const ALBION_API = 'https://gameinfo.albiononline.com/api/gameinfo';
-const TIMEOUT_MS = 10000;
-const KILL_LIMIT = 300;
+const MURDER_API = 'https://murderledger.com/api';
+const ALBION_API  = 'https://gameinfo.albiononline.com/api/gameinfo';
+const TIMEOUT_MS  = 10000;
+const KILL_LIMIT  = 300;
 
 // Traducao embutida
 const translation = {"Hallowfall":"Queda Santa","Blight Staff":"Pustulento","Holy Staff":"Cajado Sagrado","Dagger Pair":"Par de Adagas","Rampant Staff":"Rampante","Mace":"Maça 1H","Redemption Staff":"Redenção","Incubus Mace":"Íncubo","Hand of Justice":"Mão da Justiça","Nature Staff":"Cajado da Natureza","Hammer":"Martelo 1H","Longbow":"Arco Longo","Druidic Staff":"Cajado Druídico","Polehammer":"Martelo de Batalha","Occult Staff":"Oculto","Staff of Balance":"Cajado do Equilíbrio","Bedrock Mace":"Maça Pétrea","Great Arcane Staff":"Arcano Elevado","Bloodletter":"Dessangradora","Exalted Staff":"Exaltado","Oathkeepers":"Jurador","Dreadstorm Monarch":"Monarca Tempestuoso","Astral Staff":"Astral","Lifecurse Staff":"Execrado","Grovekeeper":"Guarda Bosque","Dagger":"Adaga","Witchwork Staff":"Feiticeiro","Malevolent Locus":"Locus","Arcane Staff":"Arcano Silence","Great Holy Staff":"Sagrado Elevado","Divine Staff":"Cajado Divino","Permafrost Prism":"Prisma","Frost Staff":"Cajado de Gelo","Deathgivers":"Mortíficos","Claws":"Garras","Black Monk Stave":"Monge Negro","Realmbreaker":"Quebra reino","Dawnsong":"Canção da Alvorada","Shadowcaller":"Chama-sombra","Bear Paws":"Patas de Urso","Spirithunter":"Caça espíritos","Carrioncaller":"Chama corpos","Tombhammer":"Martelo Tumular","Mistpiercer":"Furabruma","Bow of Badon":"Badon","Siegebow":"Arco de Cerco","Weeping Repeater":"Repetidor Lamentoso","Boltcasters":"Lançadores de Dardos","Galatines":"Galatinas","Kingmaker":"Cria-reis","Vendetta's Wrath":"Cajado de Fogo Virulento","Infernal Scythe":"Segadeira","Ghostfang":"Presa Demoníaca","Hellion Hands":"Mãos Pretas","Broadsword":"Espada Larga","Claymore":"Montante","Dual Swords":"Espadas Duplas","Carving Sword":"Espada Entalhada","Battle Axe":"Machado de Guerra","Great Axe":"Machadão","Halberd":"Alabarda","Spear":"Lança","Pike":"Pique","Glaive":"Archa","Crystal Reaper":"Archa Fraturada","Heron Spear":"Garceira","Trinity Spear":"Lança Trina","Warhammer":"Martelo de Guerra","Great Hammer":"Martelo Pesado","Forge Hammers":"Martelos de Forja","Crossbow":"Besta","Heavy Crossbow":"Besta Pesada","Light Crossbow":"Besta Leve","Bow":"Arco","Warbow":"Arco de Guerra","Wailing Bow":"Plangente","Whispering Bow":"Arco Sussurrante","Shortsword":"Espada Curta","Sword":"Espada","Rapier":"Rapieira","Cursed Staff":"Cajado Amaldiçoado","Great Cursed Staff":"Cajado Amaldiçoado Elevado","Fire Staff":"Cajado de Fogo","Great Fire Staff":"Cajado de Fogo Elevado","Blazing Staff":"Cajado Fulgurante","Wildfire Staff":"Cajado do Fogo Selvagem","Brimstone Staff":"Cajado Sulfuroso","Great Frost Staff":"Cajado de Gelo Elevado","Glacial Staff":"Cajado Glacial","Hoarfrost Staff":"Cajado Gélido","Great Nature Staff":"Cajado da Natureza Elevado","Ironroot Staff":"Cajado Férreo","Enigmatic Staff":"Cajado Enigmático","Demonic Staff":"Cajado Demoníaco","Reaper":"Segadeira","Double Bladed Staff":"Cajado de Dupla Lâmina","Primal Staff":"Cajado Primordial","Mistcaller":"Chamador de Névoa","Spiked Gauntlets":"Manoplas Cravadas","Brawlers":"Braçadeiras","Morning Star":"Estrela da Manhã","Scimitar":"Lâmina Aclarada","Katar":"Fúria Contida","Sickle Pair":"Gêmeas Aniquiladoras"};
@@ -30,6 +31,15 @@ async function fetchWithTimeout(url, ms) {
     clearTimeout(timer);
     throw e;
   }
+}
+
+// Busca weapon stats no murderledger.com (API publica!)
+async function fetchMurderLedger(playerName) {
+  const url = MURDER_API + '/players/' + encodeURIComponent(playerName) + '/stats/weapons?lookback_days=9999';
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  return data.weapons || [];
 }
 
 async function getPlayerId(playerName) {
@@ -207,18 +217,25 @@ module.exports = {
 
     try {
       let weapons = [];
-      const fonte = 'API Albion Online (ultimos ' + KILL_LIMIT + ' kills)';
+      let fonte = 'Murder Ledger';
 
-      const player = await getPlayerId(playerName);
-      const { weaponCount, total: t } = await getWeaponUsage(player.id);
-
-      weapons = Object.entries(weaponCount)
-        .sort(([,a],[,b]) => b - a)
-        .map(([id, count]) => ({
-          weapon_name: itemIdToName(id),
-          usages: count,
-          win_rate: null
-        }));
+      try {
+        weapons = await fetchMurderLedger(playerName);
+        if (!weapons.length) throw new Error('sem dados');
+      } catch(mlErr) {
+        console.log('[Stats] Murder Ledger falhou: ' + mlErr.message + ' — usando API Albion...');
+        fonte = 'API Albion (ultimos ' + KILL_LIMIT + ' kills)';
+        const player = await getPlayerId(playerName);
+        const { weaponCount } = await getWeaponUsage(player.id);
+        weapons = Object.entries(weaponCount)
+          .sort(([,a],[,b]) => b - a)
+          .map(([id, count]) => ({
+            weapon_name: itemIdToName(id),
+            usages: count,
+            assists: null,
+            win_rate: null
+          }));
+      }
 
       if (!weapons.length) {
         return interaction.editReply({ content: 'Nenhum dado encontrado para **' + playerName + '**.' });
@@ -235,23 +252,23 @@ module.exports = {
       }
 
       const top = weapons.slice(0, 10);
-      const totalUsos = top.reduce((s, w) => s + (w.usages || 0), 0);
 
       const embed = new EmbedBuilder()
         .setColor(0xFF4444)
         .setTitle('Stats — ' + playerName)
         .addFields(top.map((w, i) => {
           const nome    = w.weapon_name || '?';
-          const usos    = w.usages || 0;
-          const assists = w.assists != null ? ' | Assists: `' + w.assists + '`' : '';
-          const wr      = w.win_rate != null ? ' | Win: `' + (w.win_rate * 100).toFixed(0) + '%`' : '';
+          const usos    = w.usages    || 0;
+          const assists = w.assists   != null ? ' | Assists: `' + w.assists + '`' : '';
+          const kills   = w.kills     != null ? ' | Kills: `' + w.kills + '`'    : '';
+          const wr      = w.win_rate  != null ? ' | Win: `' + (w.win_rate * 100).toFixed(0) + '%`' : '';
           return {
             name: (i + 1) + '. ' + nome,
-            value: 'Usos: `' + usos + '`' + assists + wr,
+            value: 'Usos: `' + usos + '`' + kills + assists + wr,
             inline: true
           };
         }))
-        .setFooter({ text: 'Fonte: ' + fonte });
+        .setFooter({ text: 'Fonte: ' + fonte + ' | Todos os tempos' });
 
       return interaction.editReply({ embeds: [embed] });
 
