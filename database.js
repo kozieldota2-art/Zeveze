@@ -44,6 +44,15 @@ function initialize() {
       FOREIGN KEY (comp_id) REFERENCES comps(id)
     );
 
+    -- Cache de stats dos players (Murder Ledger / API Albion)
+    CREATE TABLE IF NOT EXISTS player_stats (
+      user_id      TEXT    PRIMARY KEY,
+      user_name    TEXT    NOT NULL,
+      albion_id    TEXT    DEFAULT NULL,
+      stats_json   TEXT    DEFAULT '[]',
+      updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     -- Confirmações de presença dos players
     CREATE TABLE IF NOT EXISTS confirmations (
       id                 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,6 +74,7 @@ function initialize() {
   try { db.exec('ALTER TABLE zvz_events ADD COLUMN tipo TEXT DEFAULT \'normal\''); } catch(e) {}
   // Migracao segura: adiciona coluna pt se nao existir
   try { db.exec('ALTER TABLE weapons ADD COLUMN pt INTEGER DEFAULT 1'); } catch(e) {}
+  try { db.exec('CREATE TABLE IF NOT EXISTS player_stats (user_id TEXT PRIMARY KEY, user_name TEXT NOT NULL, albion_id TEXT DEFAULT NULL, stats_json TEXT DEFAULT \'[]\', updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)'); } catch(e) {}
   console.log('✅ Banco de dados inicializado!');
 }
 
@@ -195,6 +205,34 @@ function removeConfirmation(event_id, user_id) {
   ).run(event_id, user_id);
 }
 
+// ─── PLAYER STATS CACHE ──────────────────────────────────────────────────────
+
+function getPlayerStats(user_id) {
+  const row = db.prepare('SELECT * FROM player_stats WHERE user_id = ?').get(user_id);
+  if (!row) return null;
+  try { row.stats = JSON.parse(row.stats_json); } catch(e) { row.stats = []; }
+  return row;
+}
+
+function upsertPlayerStats(user_id, user_name, albion_id, stats) {
+  return db.prepare(`
+    INSERT INTO player_stats (user_id, user_name, albion_id, stats_json, updated_at)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(user_id) DO UPDATE SET
+      user_name  = excluded.user_name,
+      albion_id  = excluded.albion_id,
+      stats_json = excluded.stats_json,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(user_id, user_name, albion_id, JSON.stringify(stats));
+}
+
+function isStatsStale(user_id, maxAgeHours = 24) {
+  const row = db.prepare('SELECT updated_at FROM player_stats WHERE user_id = ?').get(user_id);
+  if (!row) return true;
+  const age = (Date.now() - new Date(row.updated_at).getTime()) / 3600000;
+  return age > maxAgeHours;
+}
+
 module.exports = {
   initialize,
   // Comps
@@ -203,6 +241,8 @@ module.exports = {
   addWeapon, getWeaponsByComp, getWeaponById, removeWeapon,
   // Events
   createEvent, setEventMessageId, getEventById, closeEvent,
+  // Player Stats Cache
+  getPlayerStats, upsertPlayerStats, isStatsStale,
   // Confirmations
   upsertConfirmation, upsertConfirmationSimples, getConfirmationsByEvent, getConfirmation, assignWeapon, removeConfirmation
 };
