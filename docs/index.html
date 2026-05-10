@@ -248,7 +248,8 @@
       resultsEl.innerHTML = '<div class="loading"><span class="spinner"></span> Buscando no Murder Ledger...</div>';
 
       try {
-        const url = 'https://murderledger.com/api/players/' + encodeURIComponent(player) + '/stats/weapons?lookback_days=9999';
+        const target = 'https://murderledger.com/api/players/' + encodeURIComponent(player) + '/stats/weapons?lookback_days=9999';
+        const url = 'https://corsproxy.io/?' + encodeURIComponent(target);
         const res = await fetch(url);
         if (!res.ok) throw new Error('HTTP ' + res.status + ' — player nao encontrado ou servidor lento');
         const data = await res.json();
